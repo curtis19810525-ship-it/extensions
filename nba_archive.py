@@ -92,6 +92,12 @@ def classify_workbook(wb) -> dict:
                 "detail": "總表日期在第 4 列橫排，每天一欄。只重算，不搬格子",
                 "sheets": names,
             }
+        if a1_can_hold_date(master["A1"].value):
+            return {
+                "kind": "a1_only",
+                "detail": "這本沒有紀錄分頁。只改總表 A1 並重算，不搬格子",
+                "sheets": names,
+            }
     sample = ""
     if SHEET_ZONG in names:
         master = wb[SHEET_ZONG]
@@ -121,6 +127,8 @@ def actions_for(kind: str, day: str, phase: str) -> list[str]:
         return []
     if kind == "calendar":
         return ["重算整本"]
+    if kind == "a1_only":
+        return ["總表 A1=%s" % day, "重算整本"]
     if kind == "record_keep_a1":
         if phase == "results":
             return [
@@ -181,7 +189,13 @@ def _apply_com(path: str, day: str, phase: str, kind: str) -> None:
                     pass
                 record.Range("K1").NumberFormat = "@"
                 record.Range("K1").Value = day
-        elif kind == "calendar":
+        elif kind in ("calendar", "a1_only"):
+            if kind == "a1_only":
+                if SHEET_ZONG not in names:
+                    raise RuntimeError("分頁在寫入前消失")
+                master = wb.Worksheets(SHEET_ZONG)
+                master.Range(DATE_CELL).NumberFormat = "@"
+                master.Range(DATE_CELL).Value = day
             _recalc(excel)
         else:
             raise RuntimeError("未知版面不寫入")

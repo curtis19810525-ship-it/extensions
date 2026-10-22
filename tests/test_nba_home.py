@@ -76,9 +76,12 @@ class Plan(unittest.TestCase):
             [1, 2, 3, 4, 5, 6],
         )
         self.assertIn("批次轉換正負盤.py", calls)
-        self.assertIn("espn_player_stats.py", calls)
+        self.assertIn("nba_lineups.py", calls)
+        self.assertNotIn("espn_player_stats.py", calls)
         self.assertEqual(log[1][1], "FAILED")
         self.assertEqual(log[2][1], "OK")
+        self.assertEqual(log[3][1], "SKIP")
+        self.assertEqual(log[4][1], "SKIP")
 
     def test_missing_step_is_skip_not_failure(self):
         class Menu:
@@ -151,6 +154,41 @@ class ArchiveLayout(unittest.TestCase):
         results = nba_archive.actions_for("record_keep_a1", "20261021", "results")
         self.assertIn("紀錄 K1=20261021", results)
         self.assertFalse(any(item.startswith("總表 A1=") for item in results))
+
+    def test_this_workbook_only_changes_a1(self):
+        import nba_archive
+        wb = self._book()
+        master = wb.active
+        master.title = "總表"
+        master["A1"] = "20261022"
+        for name in ("數據分析", "每日數據", "正負盤", "各隊正負", "球員狀態", "各隊total", "球員傷兵", "先發名單"):
+            wb.create_sheet(name)
+        layout = nba_archive.classify_workbook(wb)
+        self.assertEqual(layout["kind"], "a1_only")
+        actions = nba_archive.actions_for("a1_only", "20261023", "focus")
+        self.assertEqual(actions, ["總表 A1=20261023", "重算整本"])
+
+    def test_filled_season_scripts_are_not_run(self):
+        calls = []
+
+        def runner(cmd):
+            calls.append(cmd[1])
+            return 0
+
+        class Menu:
+            def _build_command(self, step, start, end):
+                if step == 5:
+                    return [sys.executable, "espn_team_total.py"]
+                if step == 4:
+                    return [sys.executable, "espn_player_stats.py"]
+                return [sys.executable, f"s{step}.py", start]
+
+        log = nba_home.run_plan("20261021", "20261022", runner, Menu())
+        self.assertNotIn("espn_team_total.py", calls)
+        self.assertNotIn("espn_player_stats.py", calls)
+        self.assertIn("s1.py", calls)
+        self.assertEqual(log[3][1], "SKIP")
+        self.assertEqual(log[4][1], "SKIP")
 
     def test_unknown_layout_has_no_writes(self):
         import nba_archive

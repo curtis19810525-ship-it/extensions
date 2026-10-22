@@ -90,6 +90,18 @@ def validate_dates(results_day: str, focus_day: str) -> tuple[str, str, str | No
     return results_day, focus_day, warning
 
 
+def _keeps_filled_season(cmd) -> bool:
+    """各隊 total、球員狀態已用 2025-26 補好，一鍵不重抓。"""
+    text = " ".join(str(part) for part in cmd)
+    names = (
+        "espn_player_stats.py",
+        "espn_team_total.py",
+        "爬取ESPN球員狀態.py",
+        "爬取ESPN各隊Total.py",
+    )
+    return any(name in text for name in names)
+
+
 def run_plan(results_day: str, focus_day: str, runner, run_all=None, groups=None):
     """依序執行。runner(cmd) 回傳 exit code。回傳 (步驟, OK/FAILED/SKIP, 說明)。"""
     log = []
@@ -110,6 +122,10 @@ def run_plan(results_day: str, focus_day: str, runner, run_all=None, groups=None
                 log.append((step, "SKIP", "選單沒有這一步"))
                 continue
             shown = " ".join(cmd[1:])
+            if _keeps_filled_season(cmd):
+                print(f"步驟 {step}：保留已補好的 2025-26，不重抓")
+                log.append((step, "SKIP", "保留已補好的 2025-26"))
+                continue
             print(f"步驟 {step}：{shown}")
             try:
                 code = runner(cmd)
