@@ -102,5 +102,82 @@ class Plan(unittest.TestCase):
         self.assertEqual(launched, [])
 
 
+class ArchiveLayout(unittest.TestCase):
+    def _book(self):
+        from openpyxl import Workbook
+        return Workbook()
+
+    def test_record_layout_plans_archive_and_date(self):
+        import nba_archive
+        wb = self._book()
+        master = wb.active
+        master.title = "總表"
+        master["A1"] = "20261020"
+        record = wb.create_sheet("紀錄")
+        record["A3"] = "第1場"
+        kept = wb.create_sheet("各隊total")
+        kept["A2"] = "賽爾提克"
+        layout = nba_archive.classify_workbook(wb)
+        self.assertEqual(layout["kind"], "record")
+        results = nba_archive.actions_for("record", "20261021", "results")
+        focus = nba_archive.actions_for("record", "20261022", "focus")
+        self.assertIn("紀錄 K1=20261021", results)
+        self.assertIn("總表 A1=20261022", focus)
+        self.assertNotIn("貼上值", " ".join(focus))
+        self.assertNotIn("各隊total", " ".join(results + focus))
+
+    def test_calendar_layout_only_recalculates(self):
+        import nba_archive
+        wb = self._book()
+        master = wb.active
+        master.title = "總表"
+        master["A3"] = "天數"
+        master["A4"] = "日期"
+        master["A6"] = "一"
+        layout = nba_archive.classify_workbook(wb)
+        self.assertEqual(layout["kind"], "calendar")
+        self.assertEqual(nba_archive.actions_for("calendar", "20261021", "results"), ["重算整本"])
+
+    def test_record_with_label_in_a1_does_not_overwrite_a1(self):
+        import nba_archive
+        wb = self._book()
+        master = wb.active
+        master.title = "總表"
+        master["A1"] = "NBA總表"
+        record = wb.create_sheet("紀錄")
+        record["A2"] = "第1場"
+        layout = nba_archive.classify_workbook(wb)
+        self.assertEqual(layout["kind"], "record_keep_a1")
+        results = nba_archive.actions_for("record_keep_a1", "20261021", "results")
+        self.assertIn("紀錄 K1=20261021", results)
+        self.assertFalse(any(item.startswith("總表 A1=") for item in results))
+
+    def test_unknown_layout_has_no_writes(self):
+        import nba_archive
+        wb = self._book()
+        wb.active["A1"] = "其他表"
+        layout = nba_archive.classify_workbook(wb)
+        self.assertEqual(layout["kind"], "unknown")
+        self.assertEqual(nba_archive.actions_for("unknown", "20261021", "results"), [])
+
+    def test_refuses_mlb_workbook_path(self):
+        import nba_archive
+        os.environ["NBA_STATS_FILE"] = r"C:\Users\curti\OneDrive\MLB26\MLB26-27數據.xlsx"
+        try:
+            with self.assertRaises(SystemExit):
+                nba_archive.excel_path()
+        finally:
+            os.environ.pop("NBA_STATS_FILE", None)
+
+    def test_missing_file_on_dry_run_is_skip(self):
+        import nba_archive
+        label, status, detail = nba_archive.run_archive(
+            r"C:\missing\NBA26-27爬蟲數據.xlsx", "20261021", "results", True,
+        )
+        self.assertEqual(status, "SKIP")
+        self.assertIn("找不到", detail)
+        self.assertEqual(label, "歸檔賽果日")
+
+
 if __name__ == "__main__":
     unittest.main()

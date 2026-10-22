@@ -5,7 +5,9 @@ NBA 回家日常：只串現有爬蟲。
 賽果日跑步驟 1～3，並把該日期傳進既有腳本。
 關注日跑步驟 4～6。這三步若本來不吃日期，命令列不附加日期，只在畫面上顯示。
 
-不歸檔、不填盤口、不匯出。某一支失敗仍繼續，最後列成功／失敗。
+賽果日爬完後歸檔，關注日爬完後把總表日期改過去。
+對不上總表版面就不寫。不填盤口、不匯出。
+某一支失敗仍繼續，最後列成功／失敗。
 同資料夾若有 run_all._build_command，命令與手動選單相同。
 """
 
@@ -88,13 +90,14 @@ def validate_dates(results_day: str, focus_day: str) -> tuple[str, str, str | No
     return results_day, focus_day, warning
 
 
-def run_plan(results_day: str, focus_day: str, runner, run_all=None) -> list[tuple[int, str, str]]:
+def run_plan(results_day: str, focus_day: str, runner, run_all=None, groups=None):
     """依序執行。runner(cmd) 回傳 exit code。回傳 (步驟, OK/FAILED/SKIP, 說明)。"""
-    log: list[tuple[int, str, str]] = []
-    groups = (
-        ("賽果日", results_day, (1, 2, 3)),
-        ("關注日", focus_day, (4, 5, 6)),
-    )
+    log = []
+    if groups is None:
+        groups = (
+            ("賽果日", results_day, (1, 2, 3)),
+            ("關注日", focus_day, (4, 5, 6)),
+        )
     for label, day, steps in groups:
         print()
         print("=" * 60)
@@ -160,16 +163,23 @@ def _print_summary(log: list[tuple[int, str, str]]) -> int:
     print("回家日常 Summary")
     print("=" * 60)
     failed = False
+    skipped = False
     for step, status, detail in log:
         if status == "FAILED":
             failed = True
+        if status == "SKIP":
+            skipped = True
         extra = f"  {detail}" if detail else ""
-        print(f"{status:<6} 步驟 {step}{extra}")
+        name = step if isinstance(step, str) else f"步驟 {step}"
+        print(f"{status:<6} {name}{extra}")
     print("=" * 60)
     if failed:
-        print("有步驟失敗。Excel 沒有另外歸檔或匯出。")
+        print("有步驟失敗。未填盤口、未匯出記事本。")
         return 1
-    print("爬蟲步驟跑完。尚未歸檔、尚未填盤口、尚未匯出記事本。")
+    if skipped:
+        print("有步驟略過。尚未填盤口、尚未匯出記事本。")
+        return 0
+    print("爬蟲與總表日期跑完。尚未填盤口、尚未匯出記事本。")
     return 0
 
 
@@ -187,9 +197,9 @@ def main(argv: list[str] | None = None) -> int:
     print("=" * 60)
     print("NBA 回家日常（只串現有爬蟲）")
     print("=" * 60)
-    print("賽果日：步驟 1～3。關注日：步驟 4～6。")
+    print("賽果日：步驟 1～3，然後歸檔。關注日：步驟 4～6，然後改總表日期。")
     print("請先關閉 NBA26-27爬蟲數據.xlsx。")
-    print("這一步不歸檔、不填盤口、不匯出。")
+    print("不填盤口、不匯出。總表版面對不上時不寫格子。")
     print()
 
     if len(positionals) == 2:
@@ -222,7 +232,21 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         return subprocess_runner(cmd)
 
-    log = run_plan(results_day, focus_day, runner, run_all)
+    from nba_archive import excel_path, run_archive
+
+    path = excel_path()
+    print(f"Excel: {path}")
+    log = []
+    log.extend(run_plan(
+        results_day, focus_day, runner, run_all,
+        groups=(("賽果日", results_day, (1, 2, 3)),),
+    ))
+    log.append(run_archive(path, results_day, "results", dry_run))
+    log.extend(run_plan(
+        results_day, focus_day, runner, run_all,
+        groups=(("關注日", focus_day, (4, 5, 6)),),
+    ))
+    log.append(run_archive(path, focus_day, "focus", dry_run))
     return _print_summary(log)
 
 
