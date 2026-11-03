@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """產出 NBA26-27 量化操盤日記。
 
-第 2 頁的比分是公開賽果。氣候、訊號、水位、注碼是示範填法，
-用來讓儀表板、勝率和資金曲線一打開就有數字。正式使用前請改第 2 頁。
+第 2 頁的比分是公開賽果。氣候、訊號、水位、注碼和第 4 頁文字是示範，
+用來讓儀表板、資金曲線和日期連結一打開就能用。正式記帳請改第 2 頁和第 4 頁。
 """
 
 from __future__ import annotations
@@ -245,16 +245,16 @@ def build_master(wb: Workbook):
 def build_equity(wb: Workbook):
     ws = wb.create_sheet("3_Equity_Timeline")
     apply_grid(ws)
-    ws.merge_cells("A1:H1")
+    ws.merge_cells("A1:I1")
     put(
         ws["A1"],
-        "每日資金曲線與對帳　　這頁全部由第 2 頁加總，淡綠格子不要手改。",
+        "每日資金曲線與時間軸　　數字由第 2 頁加總。最右欄可點進第 4 頁當天的文字。",
         font_title,
         align=Alignment(horizontal="left", vertical="center"),
     )
     ws["A1"].border = Border()
     ws.row_dimensions[1].height = 28
-    headers = ["日期", "當日氣候", "下注場數", "鎖倉場數", "當日投入U", "當日淨損益U", "累積損益U", "當日勝率"]
+    headers = ["日期", "當日氣候", "下注場數", "鎖倉場數", "當日投入U", "當日淨損益U", "累積損益U", "當日勝率", "詳細日誌"]
     for col, header in enumerate(headers, start=1):
         put(ws.cell(2, col), header, font_head, fill_navy, center)
     ws.row_dimensions[2].height = 30
@@ -282,6 +282,13 @@ def build_equity(wb: Workbook):
         put(ws.cell(row, 6), f'=SUMIF(\'2_Master_Log\'!A:A,A{row},\'2_Master_Log\'!M:M)', font_body, green, center, '+0.000"U";-0.000"U";0.000"U"')
         put(ws.cell(row, 7), f'=SUM(F$3:F{row})', font_label, green, center, '+0.000"U";-0.000"U";0.000"U"')
         put(ws.cell(row, 8), f'=IFERROR(COUNTIFS(\'2_Master_Log\'!A:A,A{row},\'2_Master_Log\'!L:L,"全贏")/C{row},0)', font_body, green, center, "0.0%")
+        put(
+            ws.cell(row, 9),
+            f'=HYPERLINK("#\'4_Daily_Journal\'!A"&MATCH(A{row},\'4_Daily_Journal\'!A:A,0),"📖 查看當日分析對話與覆盤")',
+            Font(name=FONT, size=11, bold=True, color=NAVY, underline="single"),
+            green,
+            center,
+        )
         ws.row_dimensions[row].height = 24
 
     last = 2 + len(days)
@@ -305,8 +312,131 @@ def build_equity(wb: Workbook):
     series.marker.graphicalProperties.line.solidFill = NAVY
     ws.add_chart(chart, "A14")
 
-    widths(ws, {"A": 16, "B": 42, "C": 14, "D": 14, "E": 16, "F": 18, "G": 16, "H": 14})
+    widths(ws, {"A": 16, "B": 42, "C": 14, "D": 14, "E": 16, "F": 18, "G": 16, "H": 14, "I": 38})
     return ws, last
+
+
+def _games_on(day: str) -> list[tuple]:
+    return [game for game in GAMES if game[0] == day]
+
+
+def _day_climate(day: str) -> str:
+    seen: list[str] = []
+    for game in _games_on(day):
+        climate = game[3]
+        if climate not in seen:
+            seen.append(climate)
+    return "、".join(seen)
+
+
+def _pregame_text(day: str) -> str:
+    lines = [
+        "【賽前量化分析與對話推論】",
+        "示範文字，對應第 2 頁同一天的推薦。這裡不是 NotebookLM 的原始對話。",
+        "",
+    ]
+    for game in _games_on(day):
+        _day, gid, matchup, climate, pick, line, cf, signal, stake, _score, _margin, _outcome, _note = game
+        flow = "金流留白" if cf is None else f"尾盤金流 {cf:.0%}"
+        stake_text = "不進場，注碼 0U" if not stake else f"建議注碼 {stake:.1f}U"
+        lines.append(f"{gid}　{matchup}")
+        lines.append(f"氣候判讀：{climate}。訊號：{signal}。{flow}。")
+        lines.append(f"賽前結論：{pick}，{line}。{stake_text}。")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def _postgame_text(day: str) -> str:
+    lines = [
+        "【賽後對戰結算與復盤日誌】",
+        "比分是公開賽果。結果依第 2 頁的盤口結算。",
+        "",
+    ]
+    for game in _games_on(day):
+        _day, gid, matchup, _climate, pick, _line, _cf, _signal, stake, score, margin, outcome, note = game
+        margin_text = "—" if margin is None else f"{margin:+.1f}"
+        stake_text = "未下注" if not stake else f"{stake:.1f}U"
+        lines.append(f"{gid}　{matchup}　推薦 {pick}")
+        lines.append(f"終場 {score}　讓分差 {margin_text}　注碼 {stake_text}　盤口結果 {outcome}")
+        lines.append(note)
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def _text_height(text: str) -> int:
+    lines = text.count("\n") + 1
+    return min(320, max(96, lines * 18 + 12))
+
+
+def build_journal(wb: Workbook):
+    ws = wb.create_sheet("4_Daily_Journal")
+    apply_grid(ws)
+    ws.sheet_view.zoomScale = 110
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    put(
+        ws["B1"],
+        "賽前對話與賽後檢討日誌　　A 欄的日期用來讓第 3 頁跳到這一列。閱讀文字在 B 欄。",
+        font_title,
+        align=Alignment(horizontal="left", vertical="center", wrap_text=True),
+    )
+    ws["B1"].border = Border()
+    ws.row_dimensions[1].height = 28
+    ws.freeze_panes = "A2"
+    ws.print_title_rows = "1:1"
+
+    days = []
+    for game in GAMES:
+        if game[0] not in days:
+            days.append(game[0])
+
+    row = 3
+    top_align = Alignment(horizontal="left", vertical="top", wrap_text=True)
+    for day in days:
+        put(
+            ws.cell(row, 1),
+            datetime.strptime(day, "%Y-%m-%d").date(),
+            font_head,
+            fill_navy,
+            center,
+            "YYYY-MM-DD",
+        )
+        put(
+            ws.cell(row, 2),
+            f"日期 {day} | {_day_climate(day)}",
+            font_head,
+            fill_navy,
+            Alignment(horizontal="left", vertical="center", wrap_text=True),
+        )
+        ws.row_dimensions[row].height = 28
+
+        pregame = _pregame_text(day)
+        put(ws.cell(row + 1, 1), None, font_body, fill_ice, top_align)
+        put(ws.cell(row + 1, 2), pregame, font_body, fill_ice, top_align)
+        ws.row_dimensions[row + 1].height = _text_height(pregame)
+
+        postgame = _postgame_text(day)
+        put(ws.cell(row + 2, 1), None, font_body, fill_green, top_align)
+        put(ws.cell(row + 2, 2), postgame, font_body, fill_green, top_align)
+        ws.row_dimensions[row + 2].height = _text_height(postgame)
+
+        put(ws.cell(row + 3, 1), None, font_body, fill_white, center)
+        put(
+            ws.cell(row + 3, 2),
+            '=HYPERLINK("#\'3_Equity_Timeline\'!A1","⬆️ 返回時間軸總覽")',
+            Font(name=FONT, size=11, bold=True, color=NAVY, underline="single"),
+            fill_white,
+            Alignment(horizontal="left", vertical="center"),
+        )
+        ws.row_dimensions[row + 3].height = 22
+        ws.row_dimensions[row + 4].height = 16
+        row += 5
+
+    widths(ws, {"A": 18, "B": 100})
+    ws.auto_filter.ref = None
+    ws.page_setup.orientation = "portrait"
+    ws.sheet_view.showGridLines = True
+    return ws
 
 
 def build_dashboard(wb: Workbook, equity_last: int):
@@ -323,7 +453,7 @@ def build_dashboard(wb: Workbook, equity_last: int):
     ws.merge_cells("A2:L2")
     put(
         ws["A2"],
-        "示範列使用 2026-10-27 至 2026-11-03 的公開比分。五張點名贏票已放進流水帳。氣候、訊號、水位、注碼是示範，正式記帳請改第 2 頁。",
+        "示範列使用 2026-10-27 至 2026-11-03 的公開比分。五張點名贏票已放進流水帳。第 3 頁可點進第 4 頁當天文字。氣候、訊號、水位、注碼和日誌文字是示範，正式記帳請改第 2 頁和第 4 頁。",
         font_note,
         align=Alignment(horizontal="left", vertical="center", wrap_text=True),
     )
@@ -456,6 +586,7 @@ def main():
     wb.calculation.fullCalcOnLoad = True
     build_master(wb)
     _, equity_last = build_equity(wb)
+    build_journal(wb)
     build_dashboard(wb, equity_last)
     # 打開時先看儀表板
     wb.active = wb["1_Dashboard"]
