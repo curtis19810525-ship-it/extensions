@@ -337,7 +337,7 @@ def build_equity(wb: Workbook):
         put(ws.cell(row, 1), datetime.strptime(day, "%Y-%m-%d").date(), font_body, ice, center, "YYYY-MM-DD")
         put(
             ws.cell(row, 2),
-            f'=IF(A{row}="","",TEXTJOIN("、",TRUE,UNIQUE(FILTER(\'2_Master_Log\'!$D$3:$D$500,\'2_Master_Log\'!$A$3:$A$500=A{row}))))',
+            f'=IF(A{row}="","",IFERROR(INDEX(\'2_Master_Log\'!$D$3:$D$500,MATCH(A{row},\'2_Master_Log\'!$A$3:$A$500,0)),""))',
             font_body, green, left_wrap,
         )
         put(ws.cell(row, 3), f'=COUNTIFS(\'2_Master_Log\'!A:A,A{row},\'2_Master_Log\'!I:I,">0")', font_body, green, center, "0")
