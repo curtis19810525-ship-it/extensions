@@ -12,7 +12,6 @@ from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.chart.marker import Marker
-from openpyxl.comments import Comment
 from openpyxl.formatting.rule import CellIsRule, FormulaRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -242,7 +241,7 @@ def build_master(wb: Workbook):
             fill = green if col == 13 else ice
             align = left_wrap if col in (3, 5, 6, 14) else center
             put(ws.cell(row, col), value, font_body, fill, align)
-        ws.cell(row, 1).number_format = "YYYY-MM-DD"
+        ws.cell(row, 1).number_format = "yyyy-mm-dd"
         ws.cell(row, 7).number_format = "0.0%"
         ws.cell(row, 9).number_format = '0.0"U"'
         ws.cell(row, 11).number_format = "0.0"
@@ -255,16 +254,13 @@ def build_master(wb: Workbook):
         for col in range(1, 15):
             fill = fill_green if col == 13 else fill_white
             put(ws.cell(row, col), None, font_body, fill, center)
-        ws.cell(row, 1).number_format = "YYYY-MM-DD"
+        ws.cell(row, 1).number_format = "yyyy-mm-dd"
         ws.cell(row, 7).number_format = "0.0%"
         ws.cell(row, 9).number_format = '0.0"U"'
         ws.cell(row, 11).number_format = "0.0"
         ws.cell(row, 13).value = pl_formula(row)
         ws.cell(row, 13).number_format = '+0.000"U";-0.000"U";0.000"U"'
         ws.row_dimensions[row].height = 20
-
-    ws.cell(2, 11).comment = Comment("推薦標的的得分減掉對手。正數代表推薦的那隊贏分。", "日記", width=240, height=40)
-    ws.cell(2, 13).comment = Comment("全贏＝注碼乘最後一個水位數字。全輸＝減去注碼。平手與鎖倉＝0。", "日記", width=260, height=48)
 
     outcome_dv = DataValidation(type="list", formula1='"全贏,全輸,平手,鎖倉避險"', allow_blank=True)
     climate_dv = DataValidation(type="list", formula1='"氣候A (冷卻重置期),氣候B (誘盤陰雨天),氣候C (大收割期)"', allow_blank=True)
@@ -334,7 +330,7 @@ def build_equity(wb: Workbook):
         alt = index % 2 == 1
         green = fill_green_alt if alt else fill_green
         ice = fill_ice_alt if alt else fill_ice
-        put(ws.cell(row, 1), datetime.strptime(day, "%Y-%m-%d").date(), font_body, ice, center, "YYYY-MM-DD")
+        put(ws.cell(row, 1), datetime.strptime(day, "%Y-%m-%d").date(), font_body, ice, center, "yyyy-mm-dd")
         put(
             ws.cell(row, 2),
             f'=IF(A{row}="","",IFERROR(INDEX(\'2_Master_Log\'!$D$3:$D$500,MATCH(A{row},\'2_Master_Log\'!$A$3:$A$500,0)),""))',
@@ -468,7 +464,7 @@ def build_journal(wb: Workbook):
             font_head,
             fill_navy,
             center,
-            "YYYY-MM-DD",
+            "yyyy-mm-dd",
         )
         put(
             ws.cell(row, 2),
