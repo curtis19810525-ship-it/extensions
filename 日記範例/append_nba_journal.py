@@ -4,6 +4,7 @@
 雙擊「寫入量化日記.bat」。Excel 要先關掉。
 預設讀同一個資料夾的「今日日記.json」。
 日記檔會先找「NBA26-27_Quant_Betting_Journal (1).xlsx」。
+氣候只用：氣候A (放養紅利期)、氣候B (設局誘盤期)、氣候C (大收割日)、氣候D (冷卻重置期)。
 """
 
 from __future__ import annotations
@@ -36,28 +37,35 @@ WHITE = "FFFFFF"
 LINE = "B0B7C3"
 FONT_NAME = "Calibri"
 
-CLIMATES = {
-    "氣候a(冷卻重置期)": "氣候A (冷卻重置期)",
-    "氣候a-冷卻重置期": "氣候A (冷卻重置期)",
-    "氣候a-冷卻期": "氣候A (冷卻重置期)",
-    "氣候a": "氣候A (冷卻重置期)",
-    "氣候b(誘盤陰雨天)": "氣候B (誘盤陰雨天)",
-    "氣候b-誘盤陰雨天": "氣候B (誘盤陰雨天)",
-    "氣候b": "氣候B (誘盤陰雨天)",
-    "氣候c(大收割期)": "氣候C (大收割期)",
-    "氣候c-大收割期": "氣候C (大收割期)",
-    "氣候c": "氣候C (大收割期)",
-}
+OFFICIAL_CLIMATES = (
+    "氣候A (放養紅利期)",
+    "氣候B (設局誘盤期)",
+    "氣候C (大收割日)",
+    "氣候D (冷卻重置期)",
+)
+OFFICIAL_SIGNALS = (
+    "RLM逆向推盤",
+    "低溫盲區受讓",
+    "KeyPoint鎖水",
+    "高溫熔斷受讓",
+    "風控鎖倉",
+)
+CLIMATES = {"".join(name.casefold().split()): name for name in OFFICIAL_CLIMATES}
 SIGNALS = {
     "rlm逆向推盤": "RLM逆向推盤",
     "rlm": "RLM逆向推盤",
     "低溫盲區受讓": "低溫盲區受讓",
     "低溫盲區": "低溫盲區受讓",
+    "低溫受讓": "低溫盲區受讓",
+    "高溫送水盲區": "低溫盲區受讓",
+    "盲區": "低溫盲區受讓",
     "keypoint鎖水": "KeyPoint鎖水",
     "keypoint": "KeyPoint鎖水",
     "高溫熔斷受讓": "高溫熔斷受讓",
     "高溫熔斷": "高溫熔斷受讓",
+    "極端高溫熔斷": "高溫熔斷受讓",
     "風控鎖倉": "風控鎖倉",
+    "風控": "風控鎖倉",
 }
 OUTCOMES = {
     "全贏": "全贏",
@@ -85,7 +93,9 @@ FILL_ICE_ALT = PatternFill("solid", fgColor=ICE_ALT)
 FILL_GREEN = PatternFill("solid", fgColor=GREEN)
 FILL_GREEN_ALT = PatternFill("solid", fgColor=GREEN_ALT)
 FILL_WHITE = PatternFill("solid", fgColor=WHITE)
+FILL_SECTION = PatternFill("solid", fgColor="2F5496")
 FONT_BODY = Font(name=FONT_NAME, size=11, color="1A1A1A")
+FONT_SECTION = Font(name=FONT_NAME, size=11, bold=True, color=WHITE)
 FONT_HEAD = Font(name=FONT_NAME, size=12, bold=True, color=WHITE)
 FONT_LINK = Font(name=FONT_NAME, size=11, bold=True, color=NAVY, underline="single")
 CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -269,19 +279,17 @@ def parse_date(value) -> date:
 def canonical_climate(value) -> str:
     key = squash(value).casefold()
     if key not in CLIMATES:
-        names = "、".join(("氣候A (冷卻重置期)", "氣候B (誘盤陰雨天)", "氣候C (大收割期)"))
-        raise JournalError(f"氣候要是這三個之一：{names}。現在讀到：{value}")
+        names = "、".join(OFFICIAL_CLIMATES)
+        raise JournalError(f"氣候要是這四個之一：{names}。現在讀到：{value}")
     return CLIMATES[key]
 
 
 def canonical_signal(value) -> str:
     text = str(value or "").strip()
-    if not text or text == "—":
-        return ""
     key = squash(text).casefold()
     if key not in SIGNALS:
-        names = "、".join(("RLM逆向推盤", "低溫盲區受讓", "KeyPoint鎖水", "高溫熔斷受讓", "風控鎖倉"))
-        raise JournalError(f"訊號類型要是：{names}。沒有就留空。現在讀到：{value}")
+        names = "、".join(OFFICIAL_SIGNALS)
+        raise JournalError(f"訊號類型要是：{names}。現在讀到：{value}")
     return SIGNALS[key]
 
 
@@ -333,8 +341,8 @@ def parse_margin(value):
     text = str(value).strip().replace("＋", "+").replace("－", "-")
     try:
         return float(text)
-    except ValueError:
-        return text
+    except ValueError as exc:
+        raise JournalError(f"讓分差要是數字。推薦的那一隊贏寫正數，輸寫負數。現在讀到：{value}") from exc
 
 
 def parse_line(value, stake: float) -> str:
@@ -354,12 +362,11 @@ def cell_date(value) -> date | None:
 
 
 def pl_formula(row: int) -> str:
+    odds = f'IFERROR(VALUE(TRIM(RIGHT(SUBSTITUTE(F{row}," ",REPT(" ",99)),99))),0)'
     return (
         f'=IF(A{row}="","",'
-        f'IF(OR(L{row}="平手",L{row}="鎖倉避險"),0,'
-        f'IF(L{row}="全輸",-N(I{row}),'
-        f'IF(L{row}="全贏",N(I{row})*IFERROR(VALUE(TRIM(RIGHT(SUBSTITUTE(F{row}," ",REPT(" ",99)),99))),0),'
-        f'""))))'
+        f'IF(L{row}="全贏",N(I{row})*{odds},'
+        f'IF(L{row}="全輸",-N(I{row}),0)))'
     )
 
 
@@ -382,39 +389,62 @@ def normalize_package(data: dict) -> dict:
         if stake_value is None:
             raise JournalError(f"第 {index} 場沒有注碼。鎖倉請寫 0。")
         stake = parse_stake(stake_value)
+        if stake not in (0.0, 0.5, 1.0):
+            raise JournalError(f"第 {index} 場注碼只能是 0、0.5、1。現在讀到：{stake_value}")
         matchup = pick(item, "matchup", "對戰組合", "對戰")
         if not matchup:
             raise JournalError(f"第 {index} 場沒有對戰組合。")
-        game_id = pick(item, "game_id", "場次", "id") or f"G{index}"
+        game_id = str(pick(item, "game_id", "場次", "id") or f"G{index}").strip()
+        raw_signal = pick(item, "signal_type", "訊號類型", "訊號")
+        raw_outcome = pick(item, "outcome", "盤口結果", "結果")
+        if stake == 0 and not raw_signal:
+            raw_signal = "風控鎖倉"
+        if stake == 0 and not raw_outcome:
+            raw_outcome = "鎖倉避險"
+        signal = canonical_signal(raw_signal)
+        outcome = canonical_outcome(raw_outcome)
+        pick_text = str(pick(item, "pick", "推薦標的", "推薦") or "").strip()
+        line_odds = parse_line(pick(item, "line_odds", "盤口", "盤口規格與水位", "水位"), stake)
+        if stake == 0 or outcome == "鎖倉避險" or signal == "風控鎖倉":
+            stake = 0.0
+            outcome = "鎖倉避險"
+            signal = "風控鎖倉"
+            line_odds = "—"
+            pick_text = "【$0 風控鎖倉】"
+        climate = canonical_climate(climate_value)
         games.append({
-            "game_id": str(game_id).strip(),
+            "game_id": game_id,
             "matchup": str(matchup).strip(),
-            "climate": canonical_climate(climate_value),
-            "pick": str(pick(item, "pick", "推薦標的", "推薦") or "").strip(),
-            "line_odds": parse_line(pick(item, "line_odds", "盤口", "盤口規格與水位", "水位"), stake),
+            "climate": climate,
+            "pick": pick_text,
+            "line_odds": line_odds,
             "cf_pct": parse_cf(pick(item, "cf_pct", "金流", "尾盤金流", "cf")),
-            "signal_type": canonical_signal(pick(item, "signal_type", "訊號類型", "訊號")),
+            "signal_type": signal,
             "stake_u": stake,
             "score": "" if pick(item, "score", "終場比分", "比分") is None else str(pick(item, "score", "終場比分", "比分")).strip(),
             "margin": parse_margin(pick(item, "margin", "讓分差")),
-            "outcome": canonical_outcome(pick(item, "outcome", "盤口結果", "結果")),
+            "outcome": outcome,
             "review_notes": str(pick(item, "review_notes", "檢討", "賽後邏輯", "備註") or "").strip(),
+            "signal_alias": squash(str(raw_signal or "")).casefold() not in {squash(name).casefold() for name in OFFICIAL_SIGNALS},
         })
     if day_climate is None and games:
         day_climate = games[0]["climate"]
     if day_climate is None:
         raise JournalError("這一天沒有氣候。")
     climate = canonical_climate(day_climate)
+    for game in games:
+        if game["climate"] != climate:
+            raise JournalError(f"{game['game_id']} 的氣候是 {game['climate']}，當天是 {climate}。請改成同一天同一個氣候。")
     pregame = pick(data, "pre_game_text", "賽前", "pregame")
     postgame = pick(data, "post_game_text", "賽後", "postgame")
     if not pregame or not postgame:
         raise JournalError("請同時給賽前文字和賽後文字。")
     warnings = []
     for game in games:
+        if game.pop("signal_alias"):
+            warnings.append(f"{game['game_id']} 的訊號已改寫成 {game['signal_type']}。")
         if game["outcome"] == "全贏" and not game["line_odds"]:
             warnings.append(f"{game['game_id']} 是全贏，但水位是空的，損益會變成 0。")
-        if game["stake_u"] not in (0.0, 0.5, 1.0):
-            warnings.append(f"{game['game_id']} 注碼是 {game['stake_u']}。常用的是 0、0.5、1。")
     return {
         "date": day,
         "climate": climate,
@@ -540,21 +570,15 @@ def append_master(ws, package: dict) -> list[int]:
     return rows
 
 
-def append_equity(ws, package: dict, has_games: bool) -> int:
+def append_equity(ws, package: dict, has_games: bool = True) -> int:
+    del has_games
     last = last_value_row(ws, 1, 3)
     row = last + 1
     alt = (row - 3) % 2 == 1
     ice = FILL_ICE_ALT if alt else FILL_ICE
     green = FILL_GREEN_ALT if alt else FILL_GREEN
     put(ws.cell(row, 1), package["date"], FONT_BODY, ice, CENTER, "yyyy-mm-dd")
-    if has_games:
-        climate = (
-            f'=IF(A{row}="","",IFERROR(INDEX(\'2_Master_Log\'!$D$3:$D$500,'
-            f'MATCH(A{row},\'2_Master_Log\'!$A$3:$A$500,0)),""))'
-        )
-    else:
-        climate = package["climate"]
-    put(ws.cell(row, 2), climate, FONT_BODY, green, LEFT)
+    put(ws.cell(row, 2), package["climate"], FONT_BODY, green, LEFT)
     put(ws.cell(row, 3), f'=COUNTIFS(\'2_Master_Log\'!A:A,A{row},\'2_Master_Log\'!I:I,">0")', FONT_BODY, green, CENTER, "0")
     put(ws.cell(row, 4), f'=COUNTIFS(\'2_Master_Log\'!A:A,A{row},\'2_Master_Log\'!I:I,0)', FONT_BODY, green, CENTER, "0")
     put(ws.cell(row, 5), f'=SUMIF(\'2_Master_Log\'!A:A,A{row},\'2_Master_Log\'!I:I)', FONT_BODY, green, CENTER, '0.0"U"')
@@ -576,7 +600,7 @@ def append_equity(ws, package: dict, has_games: bool) -> int:
     )
     put(
         ws.cell(row, 9),
-        f'=HYPERLINK("#\'4_Daily_Journal\'!A"&MATCH(A{row},\'4_Daily_Journal\'!A:A,0),"📖 查看當日分析對話與覆盤")',
+        f'=HYPERLINK("#\'4_Daily_Journal\'!A"&MATCH(A{row},\'4_Daily_Journal\'!A:A,0),"📖 查看 "&TEXT(A{row},"yyyy-mm-dd")&" 詳細賽前分析與復盤日誌")',
         FONT_LINK, green, CENTER,
     )
     ws.row_dimensions[row].height = 24
@@ -585,11 +609,11 @@ def append_equity(ws, package: dict, has_games: bool) -> int:
 
 
 def journal_start(ws) -> int:
-    last = 3
+    last = 2
     for row in range(3, ws.max_row + 1):
-        if cell_date(ws.cell(row, 1).value) is not None:
+        if ws.cell(row, 1).value not in (None, "") or ws.cell(row, 2).value not in (None, ""):
             last = row
-    start = last + 5 if last > 3 or cell_date(ws.cell(3, 1).value) else 3
+    start = last + 2
     while ws.cell(start, 1).value not in (None, "") or ws.cell(start, 2).value not in (None, ""):
         start += 1
         if start > 5000:
@@ -597,36 +621,36 @@ def journal_start(ws) -> int:
     return start
 
 
+def _merge_text(ws, row: int, value, font, fill, align, height: int) -> None:
+    put(ws.cell(row, 2), value, font, fill, align)
+    ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=9)
+    ws.row_dimensions[row].height = height
+
+
 def append_journal(ws, package: dict) -> int:
     row = journal_start(ws)
-    climates = []
-    for game in package["games"]:
-        if game["climate"] not in climates:
-            climates.append(game["climate"])
-    climate_text = "、".join(climates) if climates else package["climate"]
-    put(ws.cell(row, 1), package["date"], FONT_HEAD, FILL_NAVY, CENTER, "yyyy-mm-dd")
+    day = package["date"]
+    banner = f"{day.isoformat()} | {package['climate']}"
+    blocks = [
+        (banner, FONT_HEAD, FILL_NAVY, Alignment(horizontal="left", vertical="center", wrap_text=True), 28),
+        ("【賽前量化分析與對話推論】", FONT_SECTION, FILL_SECTION, Alignment(horizontal="left", vertical="center"), 22),
+        (package["pre_game_text"], FONT_BODY, FILL_ICE, TOP, text_height(package["pre_game_text"])),
+        ("【賽後對戰結算與復盤日誌】", FONT_SECTION, FILL_SECTION, Alignment(horizontal="left", vertical="center"), 22),
+        (package["post_game_text"], FONT_BODY, FILL_GREEN, TOP, text_height(package["post_game_text"])),
+    ]
+    for offset, (value, font, fill, align, height) in enumerate(blocks):
+        put(ws.cell(row + offset, 1), day, FONT_HEAD if offset == 0 else FONT_BODY, fill, CENTER, "yyyy-mm-dd")
+        _merge_text(ws, row + offset, value, font, fill, align, height)
+    link_row = row + 5
+    put(ws.cell(link_row, 1), day, FONT_BODY, FILL_WHITE, CENTER, "yyyy-mm-dd")
     put(
-        ws.cell(row, 2),
-        f"日期 {package['date'].isoformat()} | {climate_text}",
-        FONT_HEAD, FILL_NAVY,
-        Alignment(horizontal="left", vertical="center", wrap_text=True),
-    )
-    ws.row_dimensions[row].height = 28
-    put(ws.cell(row + 1, 1), None, FONT_BODY, FILL_ICE, TOP)
-    put(ws.cell(row + 1, 2), package["pre_game_text"], FONT_BODY, FILL_ICE, TOP)
-    ws.row_dimensions[row + 1].height = text_height(package["pre_game_text"])
-    put(ws.cell(row + 2, 1), None, FONT_BODY, FILL_GREEN, TOP)
-    put(ws.cell(row + 2, 2), package["post_game_text"], FONT_BODY, FILL_GREEN, TOP)
-    ws.row_dimensions[row + 2].height = text_height(package["post_game_text"])
-    put(ws.cell(row + 3, 1), None, FONT_BODY, FILL_WHITE, CENTER)
-    put(
-        ws.cell(row + 3, 2),
+        ws.cell(link_row, 2),
         '=HYPERLINK("#\'3_Equity_Timeline\'!A1","⬆️ 返回時間軸總覽")',
         FONT_LINK, FILL_WHITE,
         Alignment(horizontal="left", vertical="center"),
     )
-    ws.row_dimensions[row + 3].height = 22
-    ws.row_dimensions[row + 4].height = 16
+    ws.row_dimensions[link_row].height = 22
+    ws.row_dimensions[link_row + 1].height = 16
     return row
 
 

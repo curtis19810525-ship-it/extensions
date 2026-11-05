@@ -34,18 +34,18 @@ def file_hash(path: Path) -> str:
 def sample_package():
     return {
         "date": "2026-11-04",
-        "climate": "氣候A-冷卻期",
-        "pre_game_text": "【2026-11-04 賽前分析】\n大盤氣候 A。",
+        "climate": "氣候D (冷卻重置期)",
+        "pre_game_text": "【2026-11-04 賽前分析】\n大盤氣候 D。",
         "post_game_text": "【2026-11-04 賽後覆盤】\n今日兩場。",
         "games": [
             {
                 "game_id": "G1",
                 "matchup": "湖人客 @ 勇士主",
-                "climate": "氣候A-冷卻期",
+                "climate": "氣候D (冷卻重置期)",
                 "pick": "湖人 -3",
                 "line_odds": "B盤 0.914",
                 "cf_pct": "55%",
-                "signal_type": "KeyPoint",
+                "signal_type": "高溫送水盲區",
                 "stake_u": "1U",
                 "score": "95-112",
                 "margin": -17,
@@ -55,7 +55,7 @@ def sample_package():
             {
                 "場次": "G2",
                 "對戰組合": "當日鎖倉",
-                "氣候": "氣候A",
+                "氣候": "氣候D (冷卻重置期)",
                 "推薦": "鎖倉不進場",
                 "注碼": 0,
                 "結果": "鎖倉",
@@ -79,14 +79,31 @@ class AppendJournalTests(unittest.TestCase):
             path.write_text("說明\n```json\n" + json.dumps(sample_package(), ensure_ascii=False) + "\n```\n", encoding="utf-8")
             package = journal.normalize_package(journal.load_package(path))
         self.assertEqual(package["date"].isoformat(), "2026-11-04")
-        self.assertEqual(package["climate"], "氣候A (冷卻重置期)")
-        self.assertEqual(package["games"][0]["signal_type"], "KeyPoint鎖水")
+        self.assertEqual(package["climate"], "氣候D (冷卻重置期)")
+        self.assertEqual(package["games"][0]["signal_type"], "低溫盲區受讓")
+        self.assertIn("低溫盲區受讓", package["warnings"][0])
         self.assertEqual(package["games"][0]["outcome"], "全輸")
         self.assertEqual(package["games"][0]["cf_pct"], 0.55)
         self.assertEqual(package["games"][0]["stake_u"], 1.0)
         self.assertEqual(package["games"][1]["outcome"], "鎖倉避險")
         self.assertEqual(package["games"][1]["line_odds"], "—")
         self.assertEqual(package["games"][1]["stake_u"], 0.0)
+        self.assertEqual(package["games"][1]["pick"], "【$0 風控鎖倉】")
+        with self.assertRaises(journal.JournalError):
+            journal.normalize_package({"date": "2026-11-04", "climate": "氣候A (冷卻重置期)", "pre_game_text": "a", "post_game_text": "b", "games": []})
+        with self.assertRaises(journal.JournalError):
+            journal.normalize_package({
+                "date": "2026-11-04",
+                "climate": "氣候A (放養紅利期)",
+                "pre_game_text": "a",
+                "post_game_text": "b",
+                "games": [{
+                    "game_id": "G1", "matchup": "客 @ 主", "climate": "氣候A (放養紅利期)",
+                    "pick": "客 +1", "line_odds": "C盤 0.900", "cf_pct": 0.4,
+                    "signal_type": "低溫盲區受讓", "stake_u": 2, "score": "", "margin": "主+7",
+                    "outcome": "全贏", "review_notes": "",
+                }],
+            })
 
     def test_prefers_downloaded_copy_name(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -144,7 +161,9 @@ class AppendJournalTests(unittest.TestCase):
             self.assertEqual(cards["B48"].value, journal_banner)
             self.assertEqual(journal.cell_date(master["A79"].value).isoformat(), "2026-11-04")
             self.assertEqual(master["B79"].value, "G1")
-            self.assertEqual(master["D79"].value, "氣候A (冷卻重置期)")
+            self.assertEqual(master["D79"].value, "氣候D (冷卻重置期)")
+            self.assertEqual(master["H79"].value, "低溫盲區受讓")
+            self.assertEqual(master["E80"].value, "【$0 風控鎖倉】")
             self.assertEqual(master["F79"].value, "B盤 0.914")
             self.assertEqual(master["G79"].value, 0.55)
             self.assertEqual(master["L79"].value, "全輸")
@@ -157,8 +176,9 @@ class AppendJournalTests(unittest.TestCase):
 
             self.assertEqual(journal.cell_date(equity["A12"].value).isoformat(), "2026-11-03")
             self.assertEqual(journal.cell_date(equity["A13"].value).isoformat(), "2026-11-04")
-            self.assertIn("MATCH(A13,'2_Master_Log'!$A$3:$A$500,0)", equity["B13"].value)
+            self.assertEqual(equity["B13"].value, "氣候D (冷卻重置期)")
             self.assertEqual(equity["G13"].value, "=SUM(F$3:F13)")
+            self.assertIn("TEXT(A13,\"yyyy-mm-dd\")", equity["I13"].value)
             self.assertIn("4_Daily_Journal", equity["I13"].value)
             chart = equity._charts[0]
             self.assertEqual(chart.series[0].val.numRef.f, "'3_Equity_Timeline'!$G$3:$G$13")
@@ -167,11 +187,14 @@ class AppendJournalTests(unittest.TestCase):
 
             self.assertEqual(journal.cell_date(cards["A48"].value).isoformat(), "2026-11-03")
             self.assertEqual(journal.cell_date(cards["A53"].value).isoformat(), "2026-11-04")
-            self.assertIsNone(cards["A54"].value)
-            self.assertIn("賽前分析", cards["B54"].value)
-            self.assertIn("賽後覆盤", cards["B55"].value)
-            self.assertIn("3_Equity_Timeline", cards["B56"].value)
-            self.assertEqual(cards["B53"].value, "日期 2026-11-04 | 氣候A (冷卻重置期)")
+            self.assertEqual(journal.cell_date(cards["A58"].value).isoformat(), "2026-11-04")
+            self.assertEqual(cards["B53"].value, "2026-11-04 | 氣候D (冷卻重置期)")
+            self.assertEqual(cards["B54"].value, "【賽前量化分析與對話推論】")
+            self.assertIn("賽前分析", cards["B55"].value)
+            self.assertEqual(cards["B56"].value, "【賽後對戰結算與復盤日誌】")
+            self.assertIn("賽後覆盤", cards["B57"].value)
+            self.assertIn("3_Equity_Timeline", cards["B58"].value)
+            self.assertIn("B53:I53", {str(merged) for merged in cards.merged_cells.ranges})
             saved.close()
 
             with zipfile.ZipFile(workbook) as book:
