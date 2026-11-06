@@ -525,6 +525,47 @@ def extend_chart(ws, last_row: int) -> None:
         marker.col = 0
 
 
+def rows_for_date(ws, day: date) -> list[int]:
+    found = []
+    for row in range(3, ws.max_row + 1):
+        if cell_date(ws.cell(row, 1).value) == day:
+            found.append(row)
+    return found
+
+
+def write_master_row(ws, row: int, package: dict, game: dict) -> None:
+    alt = (row - 3) % 2 == 1
+    ice = FILL_ICE_ALT if alt else FILL_ICE
+    green = FILL_GREEN_ALT if alt else FILL_GREEN
+    values = [
+        package["date"],
+        game["game_id"],
+        game["matchup"],
+        game["climate"],
+        game["pick"],
+        game["line_odds"],
+        game["cf_pct"],
+        game["signal_type"],
+        game["stake_u"],
+        game["score"],
+        game["margin"],
+        game["outcome"],
+        pl_formula(row),
+        game["review_notes"],
+    ]
+    for column, value in enumerate(values, start=1):
+        fill = green if column == 13 else ice
+        align = LEFT if column in (3, 5, 6, 14) else CENTER
+        font = Font(name=FONT_NAME, size=11, bold=True) if column == 13 else FONT_BODY
+        put(ws.cell(row, column), value, font, fill, align)
+    ws.cell(row, 1).number_format = "yyyy-mm-dd"
+    ws.cell(row, 7).number_format = "0.0%"
+    ws.cell(row, 9).number_format = '0.0"U"'
+    ws.cell(row, 11).number_format = "0.0"
+    ws.cell(row, 13).number_format = '+0.000"U";-0.000"U";0.000"U"'
+    ws.row_dimensions[row].height = 22 if game["stake_u"] == 0 else 30
+
+
 def append_master(ws, package: dict) -> list[int]:
     last = last_value_row(ws, 1, 3)
     start = last + 1
@@ -534,36 +575,7 @@ def append_master(ws, package: dict) -> list[int]:
     rows = []
     for offset, game in enumerate(games):
         row = start + offset
-        alt = (row - 3) % 2 == 1
-        ice = FILL_ICE_ALT if alt else FILL_ICE
-        green = FILL_GREEN_ALT if alt else FILL_GREEN
-        values = [
-            package["date"],
-            game["game_id"],
-            game["matchup"],
-            game["climate"],
-            game["pick"],
-            game["line_odds"],
-            game["cf_pct"],
-            game["signal_type"],
-            game["stake_u"],
-            game["score"],
-            game["margin"],
-            game["outcome"],
-            pl_formula(row),
-            game["review_notes"],
-        ]
-        for column, value in enumerate(values, start=1):
-            fill = green if column == 13 else ice
-            align = LEFT if column in (3, 5, 6, 14) else CENTER
-            font = Font(name=FONT_NAME, size=11, bold=True) if column == 13 else FONT_BODY
-            put(ws.cell(row, column), value, font, fill, align)
-        ws.cell(row, 1).number_format = "yyyy-mm-dd"
-        ws.cell(row, 7).number_format = "0.0%"
-        ws.cell(row, 9).number_format = '0.0"U"'
-        ws.cell(row, 11).number_format = "0.0"
-        ws.cell(row, 13).number_format = '+0.000"U";-0.000"U";0.000"U"'
-        ws.row_dimensions[row].height = 22 if game["stake_u"] == 0 else 30
+        write_master_row(ws, row, package, game)
         rows.append(row)
     if rows:
         extend_filter(ws, rows[-1])
@@ -660,8 +672,21 @@ def locate_rows(wb, package: dict) -> dict:
     journal = sheet_or_stop(wb, "4_Daily_Journal")
     sheet_or_stop(wb, "1_Dashboard")
     day = package["date"]
-    if date_exists(master, 1, 3, day) or date_exists(equity, 1, 3, day) or date_exists(journal, 1, 3, day):
-        raise JournalError(f"{day.isoformat()} 已經在日記裡。這支不會把同一天再寫一次。")
+    existing = rows_for_date(master, day)
+    if existing:
+        if len(existing) != len(package["games"]):
+            raise JournalError(
+                f"{day.isoformat()} 已經有 {len(existing)} 場，這份資料是 {len(package['games'])} 場。"
+                "場數不同，沒有改檔。"
+            )
+        equity_rows = rows_for_date(equity, day)
+        journal_rows = rows_for_date(journal, day)
+        return {
+            "master_rows": existing,
+            "equity_row": equity_rows[0] if equity_rows else None,
+            "journal_row": journal_rows[0] if journal_rows else None,
+            "replaced": True,
+        }
     master_last = last_value_row(master, 1, 3)
     equity_last = last_value_row(equity, 1, 3)
     game_count = len(package["games"])
@@ -670,7 +695,39 @@ def locate_rows(wb, package: dict) -> dict:
         "master_rows": master_rows,
         "equity_row": equity_last + 1,
         "journal_row": journal_start(journal),
+        "replaced": False,
     }
+
+
+def update_journal(ws, package: dict, header: int) -> None:
+    day = package["date"]
+    pregame = package["pre_game_text"]
+    postgame = package["post_game_text"]
+    if ws.cell(header + 1, 2).value == "【賽前量化分析與對話推論】":
+        ws.cell(header, 2).value = f"{day.isoformat()} | {package['climate']}"
+        ws.cell(header + 2, 2).value = pregame
+        ws.cell(header + 4, 2).value = postgame
+        ws.row_dimensions[header + 2].height = text_height(pregame)
+        ws.row_dimensions[header + 4].height = text_height(postgame)
+        return
+    ws.cell(header, 2).value = f"日期 {day.isoformat()} | {package['climate']}"
+    ws.cell(header + 1, 2).value = pregame
+    ws.cell(header + 2, 2).value = postgame
+    ws.row_dimensions[header + 1].height = text_height(pregame)
+    ws.row_dimensions[header + 2].height = text_height(postgame)
+
+
+def replace_package(wb, package: dict, plan: dict) -> dict:
+    master = sheet_or_stop(wb, "2_Master_Log")
+    for row, game in zip(plan["master_rows"], package["games"]):
+        write_master_row(master, row, package, game)
+    equity_row = plan["equity_row"]
+    if equity_row is not None:
+        sheet_or_stop(wb, "3_Equity_Timeline").cell(equity_row, 2).value = package["climate"]
+    journal_row = plan["journal_row"]
+    if journal_row is not None:
+        update_journal(sheet_or_stop(wb, "4_Daily_Journal"), package, journal_row)
+    return plan
 
 
 def apply_package(wb, package: dict) -> dict:
@@ -700,6 +757,8 @@ def describe(workbook: Path, json_path: Path, package: dict, plan: dict, others:
         f"時間軸：第 {plan['equity_row']} 列",
         f"日誌：第 {plan['journal_row']} 列",
     ]
+    if plan.get("replaced"):
+        lines.append("這一天已經在日記裡。這次會用新資料蓋過同一天，不會另外新增一份。")
     for other in others:
         lines.append(f"另外也找到這本，這次不會寫它：{other}")
     for warning in package.get("warnings", []):
@@ -746,7 +805,12 @@ def run(json_path: Path, workbook: Path, dry_run: bool = False, roots: list[Path
     others = other_workbooks(selected, roots)
     ensure_closed(selected)
     wb = load_workbook(selected)
-    plan = locate_rows(wb, package) if dry_run else apply_package(wb, package)
+    plan = locate_rows(wb, package)
+    if not dry_run:
+        if plan.get("replaced"):
+            replace_package(wb, package, plan)
+        else:
+            apply_package(wb, package)
     text = describe(selected, json_path, package, plan, others)
     if dry_run:
         text += "\n上面只是檢查，還沒寫入。"

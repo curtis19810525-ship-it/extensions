@@ -203,12 +203,26 @@ class AppendJournalTests(unittest.TestCase):
             self.assertNotIn(b"YYYY", xml)
             self.assertFalse(any("vml" in name.lower() for name in names))
 
-            with self.assertRaises(SystemExit):
-                journal.main([str(payload), str(workbook)])
+            refreshed = sample_package()
+            refreshed["post_game_text"] = "【2026-11-04 賽後覆盤】\n賽後已更新。"
+            refreshed["games"][0]["outcome"] = "全贏"
+            refreshed["games"][0]["score"] = "110 : 100"
+            refreshed["games"][0]["signal_type"] = "低溫盲區受讓"
+            payload.write_text(json.dumps(refreshed, ensure_ascii=False), encoding="utf-8")
+            journal.main([str(payload), str(workbook)])
             again = load_workbook(workbook)
             self.assertIsNone(again["2_Master_Log"]["A81"].value)
+            self.assertEqual(again["2_Master_Log"]["L79"].value, "全贏")
+            self.assertEqual(again["2_Master_Log"]["J79"].value, "110 : 100")
             self.assertEqual(journal.cell_date(again["3_Equity_Timeline"]["A13"].value).isoformat(), "2026-11-04")
+            self.assertIsNone(again["3_Equity_Timeline"]["A14"].value)
+            self.assertIn("賽後已更新", again["4_Daily_Journal"]["B57"].value)
             again.close()
+            short = sample_package()
+            short["games"] = short["games"][:1]
+            payload.write_text(json.dumps(short, ensure_ascii=False), encoding="utf-8")
+            with self.assertRaises(SystemExit):
+                journal.main([str(payload), str(workbook)])
 
             os.chmod(workbook, 0o444)
             try:
