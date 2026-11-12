@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""把 exports 裡的賽後結果與賽前推票合成一份 UTF-8 報告。"""
+"""把 exports 裡的賽後結果與賽前推薦合成一份 UTF-8 報告。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 POST_SUFFIX = "賽後結果.txt"
-PRE_SUFFIX = "賽前推票.txt"
+PRE_SUFFIXES = ("賽前推薦.txt", "賽前推票.txt")
 SEPARATOR = "========================================="
 
 
@@ -95,12 +95,14 @@ def locate_sources(base: Path, results_day: str | None, focus_day: str | None):
     if not focus_day:
         focus_day = (datetime.strptime(results_day, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
     post_name = f"{results_day}{POST_SUFFIX}"
-    pre_name = f"{focus_day}{PRE_SUFFIX}"
     for folder in folders:
         post_path = folder / post_name
-        pre_path = folder / pre_name
-        if post_path.is_file() and pre_path.is_file():
-            return post_path, pre_path, results_day, focus_day
+        if not post_path.is_file():
+            continue
+        for suffix in PRE_SUFFIXES:
+            pre_path = folder / f"{focus_day}{suffix}"
+            if pre_path.is_file():
+                return post_path, pre_path, results_day, focus_day
     return None, None, results_day, focus_day
 
 
@@ -108,9 +110,9 @@ def write_report(folder: Path, results_day: str | None = None, focus_day: str | 
     post_path, pre_path, results_day, focus_day = locate_sources(folder, results_day, focus_day)
     if post_path is None or pre_path is None:
         if results_day and focus_day:
-            print(f"在 exports 找不到 {results_day}{POST_SUFFIX} 或 {focus_day}{PRE_SUFFIX}，未產出綜合報告。")
+            print(f"在 exports 找不到 {results_day}{POST_SUFFIX} 或 {focus_day}{PRE_SUFFIXES[0]}，未產出綜合報告。")
         else:
-            print("在 exports 找不到賽後結果與隔日賽前推票，未產出綜合報告。")
+            print("在 exports 找不到賽後結果與隔日賽前推薦，未產出綜合報告。")
         return None
     destination = report_path(post_path.parent, results_day, focus_day)
     text = build_report(read_text(post_path), read_text(pre_path))

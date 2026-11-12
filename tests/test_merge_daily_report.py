@@ -13,7 +13,7 @@ class MergeDailyReport(unittest.TestCase):
             exports = root / "exports"
             exports.mkdir()
             (exports / "20261112賽後結果.txt").write_text("今日賽後比分與復盤數據\n熱火 117", encoding="utf-8")
-            (exports / "20261113賽前推票.txt").write_bytes("明日賽前盤口走勢與量化分析\n魔術 +2".encode("cp950"))
+            (exports / "20261113賽前推薦.txt").write_bytes("明日賽前盤口走勢與量化分析\n魔術 +2".encode("cp950"))
             destination = merge_daily_report.write_report(root, "20261112", "20261113")
             self.assertEqual(destination.parent, exports)
             self.assertEqual(destination.name, "20261112賽後與1113賽前.txt")
@@ -37,7 +37,7 @@ class MergeDailyReport(unittest.TestCase):
             newer = exports / "20261112賽後結果.txt"
             older.write_text("舊", encoding="utf-8")
             newer.write_text("新賽後", encoding="utf-8")
-            (exports / "20261113賽前推票.txt").write_text("新賽前", encoding="utf-8")
+            (exports / "20261113賽前推薦.txt").write_text("新賽前", encoding="utf-8")
             later = time.time() + 5
             os.utime(newer, (later, later))
             destination = merge_daily_report.write_report(Path(folder))
