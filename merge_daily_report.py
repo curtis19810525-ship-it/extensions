@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""把今日賽後.txt 與明日賽前.txt 合成一份 UTF-8 綜合報告。"""
+"""把 exports 裡的賽後結果與賽前推票合成一份 UTF-8 報告。"""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-POST_NAME = "今日賽後.txt"
-PRE_NAME = "明日賽前.txt"
+POST_SUFFIX = "賽後結果.txt"
+PRE_SUFFIX = "賽前推票.txt"
 SEPARATOR = "========================================="
 
 
@@ -49,19 +49,70 @@ def report_path(folder: Path, results_day: str, focus_day: str) -> Path:
     return folder / f"{results:%Y%m%d}賽後與{focus:%m%d}賽前.txt"
 
 
-def write_report(folder: Path, results_day: str | None = None, focus_day: str | None = None) -> Path | None:
-    folder = Path(folder)
-    post_path = folder / POST_NAME
-    pre_path = folder / PRE_NAME
-    if not post_path.is_file() or not pre_path.is_file():
-        missing = [name for name, path in ((POST_NAME, post_path), (PRE_NAME, pre_path)) if not path.is_file()]
-        print("找不到" + "、".join(missing) + "，未產出綜合報告。")
+def _day_from_name(name: str, suffix: str) -> str | None:
+    if not name.endswith(suffix):
         return None
+    day = name[: -len(suffix)]
+    if len(day) != 8 or not day.isdigit():
+        return None
+    try:
+        datetime.strptime(day, "%Y%m%d")
+    except ValueError:
+        return None
+    return day
+
+
+def _search_folders(base: Path) -> list[Path]:
+    folders = []
+    exports = base / "exports"
+    if exports.is_dir():
+        folders.append(exports)
+    if base.is_dir():
+        folders.append(base)
+    return folders
+
+
+def locate_sources(base: Path, results_day: str | None, focus_day: str | None):
+    """回傳 (賽後檔, 賽前檔, 賽果日, 關注日)。找不到時前兩個是 None。"""
+    folders = _search_folders(Path(base))
+    if results_day:
+        datetime.strptime(results_day, "%Y%m%d")
+    if focus_day:
+        datetime.strptime(focus_day, "%Y%m%d")
     if not results_day:
-        results_day = datetime.now().strftime("%Y%m%d")
+        newest = None
+        for folder in folders:
+            for path in folder.glob(f"????????{POST_SUFFIX}"):
+                day = _day_from_name(path.name, POST_SUFFIX)
+                if day is None:
+                    continue
+                stamp = path.stat().st_mtime
+                if newest is None or stamp >= newest[0]:
+                    newest = (stamp, day)
+        if newest is None:
+            return None, None, None, None
+        results_day = newest[1]
     if not focus_day:
         focus_day = (datetime.strptime(results_day, "%Y%m%d") + timedelta(days=1)).strftime("%Y%m%d")
-    destination = report_path(folder, results_day, focus_day)
+    post_name = f"{results_day}{POST_SUFFIX}"
+    pre_name = f"{focus_day}{PRE_SUFFIX}"
+    for folder in folders:
+        post_path = folder / post_name
+        pre_path = folder / pre_name
+        if post_path.is_file() and pre_path.is_file():
+            return post_path, pre_path, results_day, focus_day
+    return None, None, results_day, focus_day
+
+
+def write_report(folder: Path, results_day: str | None = None, focus_day: str | None = None) -> Path | None:
+    post_path, pre_path, results_day, focus_day = locate_sources(folder, results_day, focus_day)
+    if post_path is None or pre_path is None:
+        if results_day and focus_day:
+            print(f"在 exports 找不到 {results_day}{POST_SUFFIX} 或 {focus_day}{PRE_SUFFIX}，未產出綜合報告。")
+        else:
+            print("在 exports 找不到賽後結果與隔日賽前推票，未產出綜合報告。")
+        return None
+    destination = report_path(post_path.parent, results_day, focus_day)
     text = build_report(read_text(post_path), read_text(pre_path))
     destination.write_bytes(text.encode("utf-8-sig"))
     print(f"綜合報告：{destination}")

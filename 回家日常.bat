@@ -11,10 +11,11 @@ echo 請先關閉 NBA26-27爬蟲數據.xlsx。
 echo.
 echo 賽果日跑步驟 1～3 後歸檔。關注日跑步驟 4～6 後改總表日期。
 echo 不填盤口。版面對不上時不寫格子。
-echo 若同資料夾已有今日賽後.txt 與明日賽前.txt，會另存 20261112賽後與1113賽前.txt 這種檔名。
+echo 會把 exports 的賽後結果與賽前推票合成 20261112賽後與1113賽前.txt。
 echo 手動選單仍用 爬蟲正負各隊.bat。
 echo.
 
 python "%~dp0nba_home.py"
+python "%~dp0merge_daily_report.py"
 echo.
 pause
