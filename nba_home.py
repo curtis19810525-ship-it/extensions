@@ -17,6 +17,7 @@ import importlib
 import subprocess
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 
 def _configure_stdio() -> None:
@@ -263,7 +264,13 @@ def main(argv: list[str] | None = None) -> int:
         groups=(("關注日", focus_day, (4, 5, 6)),),
     ))
     log.append(run_archive(path, focus_day, "focus", dry_run))
-    return _print_summary(log)
+    code = _print_summary(log)
+    if dry_run:
+        print("dry-run，不產出綜合報告。")
+        return code
+    from merge_daily_report import write_report
+    write_report(Path(__file__).resolve().parent, results_day, focus_day)
+    return code
 
 
 if __name__ == "__main__":
