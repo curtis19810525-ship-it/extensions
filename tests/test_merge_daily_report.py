@@ -22,6 +22,7 @@ class MergeDailyReport(unittest.TestCase):
             text = raw.decode("utf-8-sig")
             self.assertEqual(
                 text,
+                "20261112賽後與1113賽前\r\n"
                 "今日賽後比分與復盤數據\r\n熱火 117\r\n"
                 "=========================================\r\n"
                 "明日賽前盤口走勢與量化分析\r\n魔術 +2\r\n",
@@ -42,6 +43,7 @@ class MergeDailyReport(unittest.TestCase):
             os.utime(newer, (later, later))
             destination = merge_daily_report.write_report(Path(folder))
             self.assertEqual(destination.name, "20261112賽後與1113賽前.txt")
+            self.assertTrue(destination.read_bytes().decode("utf-8-sig").startswith("20261112賽後與1113賽前\r\n"))
 
     def test_focus_month_and_day_stay_four_digits(self):
         path = merge_daily_report.report_path(Path("."), "20260105", "20260106")

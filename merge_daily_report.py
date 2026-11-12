@@ -34,8 +34,15 @@ def normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
 
 
-def build_report(post_text: str, pre_text: str) -> str:
+def report_title(results_day: str, focus_day: str) -> str:
+    results = datetime.strptime(results_day, "%Y%m%d")
+    focus = datetime.strptime(focus_day, "%Y%m%d")
+    return f"{results:%Y%m%d}賽後與{focus:%m%d}賽前"
+
+
+def build_report(post_text: str, pre_text: str, title: str) -> str:
     body = "\n".join((
+        title,
         normalize_newlines(post_text),
         SEPARATOR,
         normalize_newlines(pre_text),
@@ -44,9 +51,7 @@ def build_report(post_text: str, pre_text: str) -> str:
 
 
 def report_path(folder: Path, results_day: str, focus_day: str) -> Path:
-    results = datetime.strptime(results_day, "%Y%m%d")
-    focus = datetime.strptime(focus_day, "%Y%m%d")
-    return folder / f"{results:%Y%m%d}賽後與{focus:%m%d}賽前.txt"
+    return folder / f"{report_title(results_day, focus_day)}.txt"
 
 
 def _day_from_name(name: str, suffix: str) -> str | None:
@@ -115,7 +120,8 @@ def write_report(folder: Path, results_day: str | None = None, focus_day: str | 
             print("在 exports 找不到賽後結果與隔日賽前推薦，未產出綜合報告。")
         return None
     destination = report_path(post_path.parent, results_day, focus_day)
-    text = build_report(read_text(post_path), read_text(pre_path))
+    title = report_title(results_day, focus_day)
+    text = build_report(read_text(post_path), read_text(pre_path), title)
     destination.write_bytes(text.encode("utf-8-sig"))
     print(f"綜合報告：{destination}")
     return destination
