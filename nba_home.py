@@ -269,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
         print("dry-run，不產出綜合報告。")
         return code
     from merge_daily_report import write_report
-    write_report(Path(__file__).resolve().parent, results_day)
+    write_report(Path(__file__).resolve().parent, results_day, focus_day)
     return code
 
 
