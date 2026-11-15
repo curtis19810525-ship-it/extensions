@@ -79,6 +79,9 @@ OUTCOMES = {
     "鎖倉避險": "鎖倉避險",
     "鎖倉": "鎖倉避險",
     "不進場": "鎖倉避險",
+    "待結算": "待結算",
+    "待開賽": "待結算",
+    "未結算": "待結算",
 }
 
 THIN = Border(
@@ -296,7 +299,7 @@ def canonical_signal(value) -> str:
 def canonical_outcome(value) -> str:
     key = str(value or "").strip()
     if key not in OUTCOMES:
-        raise JournalError(f"盤口結果要是全贏、全輸、平手、鎖倉避險。現在讀到：{value}")
+        raise JournalError(f"盤口結果要是全贏、全輸、平手、鎖倉避險、待結算。現在讀到：{value}")
     return OUTCOMES[key]
 
 
@@ -445,6 +448,8 @@ def normalize_package(data: dict) -> dict:
             warnings.append(f"{game['game_id']} 的訊號已改寫成 {game['signal_type']}。")
         if game["outcome"] == "全贏" and not game["line_odds"]:
             warnings.append(f"{game['game_id']} 是全贏，但水位是空的，損益會變成 0。")
+        if game["outcome"] == "待結算":
+            warnings.append(f"{game['game_id']} 還沒開賽，盤口結果先記待結算。賽後用同一天再寫一次。")
     return {
         "date": day,
         "climate": climate,
