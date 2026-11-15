@@ -105,6 +105,38 @@ class AppendJournalTests(unittest.TestCase):
                 }],
             })
 
+    def test_pregame_pending_keeps_the_real_bet_and_locks_the_rest(self):
+        package = journal.normalize_package({
+            "date": "2026-11-13",
+            "status": "賽前預測",
+            "climate": "氣候B (設局誘盤期)",
+            "pre_game_text": "賽前",
+            "post_game_text": "【待賽後開獎復盤】",
+            "games": [
+                {
+                    "game_id": "G1", "matchup": "多倫多暴龍 @ 費城 76人",
+                    "climate": "氣候B (設局誘盤期)", "pick": "【$0 風控鎖倉】",
+                    "line_odds": "—", "cf_pct": 0.56, "signal_type": "風控鎖倉",
+                    "stake_u": 0, "score": "待開賽", "margin": None,
+                    "outcome": "待結算", "review_notes": "超深盤鎖倉",
+                },
+                {
+                    "game_id": "G4", "matchup": "夏洛特黃蜂 @ 鳳凰城太陽",
+                    "climate": "氣候B (設局誘盤期)", "pick": "夏洛特黃蜂 受讓 +7.5",
+                    "line_odds": "C盤 0.825", "cf_pct": 0.29, "signal_type": "高溫熔斷受讓",
+                    "stake_u": 0.5, "score": "待開賽", "margin": None,
+                    "outcome": "待結算", "review_notes": "高溫熔斷",
+                },
+            ],
+        })
+        self.assertEqual(package["games"][0]["outcome"], "鎖倉避險")
+        self.assertEqual(package["games"][0]["stake_u"], 0.0)
+        self.assertEqual(package["games"][1]["outcome"], "待結算")
+        self.assertEqual(package["games"][1]["stake_u"], 0.5)
+        self.assertEqual(package["games"][1]["line_odds"], "C盤 0.825")
+        self.assertIsNone(package["games"][1]["margin"])
+        self.assertIn("G4", package["warnings"][0])
+
     def test_prefers_downloaded_copy_name(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
