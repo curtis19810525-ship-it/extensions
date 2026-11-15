@@ -137,6 +137,12 @@ class AppendJournalTests(unittest.TestCase):
         self.assertIsNone(package["games"][1]["margin"])
         self.assertIn("G4", package["warnings"][0])
 
+    def test_duplicate_game_id_is_rejected(self):
+        package = sample_package()
+        package["games"][1]["場次"] = "G1"
+        with self.assertRaises(journal.JournalError):
+            journal.normalize_package(package)
+
     def test_prefers_downloaded_copy_name(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -251,10 +257,60 @@ class AppendJournalTests(unittest.TestCase):
             self.assertIn("賽後已更新", again["4_Daily_Journal"]["B57"].value)
             again.close()
             short = sample_package()
-            short["games"] = short["games"][:1]
+            short["pre_game_text"] = "【2026-11-04 賽前分析】\n賽前已更新。"
+            short["post_game_text"] = "【2026-11-04 賽後覆盤】\n只改這一場。"
+            short["games"] = [short["games"][0]]
+            short["games"][0]["pick"] = "不該蓋掉推薦"
+            short["games"][0]["score"] = "100-90"
+            short["games"][0]["margin"] = 8
+            short["games"][0]["outcome"] = "全贏"
+            short["games"][0]["review_notes"] = "只改結算"
             payload.write_text(json.dumps(short, ensure_ascii=False), encoding="utf-8")
-            with self.assertRaises(SystemExit):
-                journal.main([str(payload), str(workbook)])
+            journal.main([str(payload), str(workbook)])
+            settled = load_workbook(workbook)
+            master = settled["2_Master_Log"]
+            self.assertEqual(master["E79"].value, "湖人 -3")
+            self.assertEqual(master["J79"].value, "100-90")
+            self.assertEqual(master["K79"].value, 8)
+            self.assertEqual(master["L79"].value, "全贏")
+            self.assertEqual(master["N79"].value, "只改結算")
+            self.assertEqual(master["B80"].value, "G2")
+            self.assertEqual(master["L80"].value, "鎖倉避險")
+            self.assertIsNone(master["A81"].value)
+            self.assertIn("賽前已更新", settled["4_Daily_Journal"]["B55"].value)
+            self.assertIn("只改這一場", settled["4_Daily_Journal"]["B57"].value)
+            self.assertIsNone(settled["3_Equity_Timeline"]["A14"].value)
+            self.assertEqual(
+                settled["3_Equity_Timeline"]._charts[0].series[0].val.numRef.f,
+                "'3_Equity_Timeline'!$G$3:$G$13",
+            )
+            settled.close()
+
+            added = sample_package()
+            added["games"] = [{
+                "game_id": "G3",
+                "matchup": "新的一場",
+                "climate": "氣候D (冷卻重置期)",
+                "pick": "客 +1.5",
+                "line_odds": "C盤 0.900",
+                "cf_pct": 0.4,
+                "signal_type": "低溫盲區受讓",
+                "stake_u": 0.5,
+                "score": "待開賽",
+                "margin": None,
+                "outcome": "待結算",
+                "review_notes": "賽前先記",
+            }]
+            payload.write_text(json.dumps(added, ensure_ascii=False), encoding="utf-8")
+            journal.main([str(payload), str(workbook)])
+            with_new = load_workbook(workbook)
+            self.assertEqual(with_new["2_Master_Log"]["B81"].value, "G3")
+            self.assertEqual(with_new["2_Master_Log"]["E81"].value, "客 +1.5")
+            self.assertEqual(with_new["2_Master_Log"]["L81"].value, "待結算")
+            self.assertEqual(with_new["2_Master_Log"]["E79"].value, "湖人 -3")
+            self.assertIsNone(with_new["3_Equity_Timeline"]["A14"].value)
+            self.assertEqual(with_new["2_Master_Log"].auto_filter.ref, "A2:N81")
+            with_new.close()
 
             os.chmod(workbook, 0o444)
             try:
