@@ -32,6 +32,7 @@ if errorlevel 1 (
 
 echo.
 echo The check above is not written yet.
+echo If the JSON file contains more than one day, one keypress writes all of them.
 echo Press any key to write into the Excel file. Close this window to cancel.
 pause >nul
 
