@@ -4,6 +4,7 @@
 雙擊「寫入量化日記.bat」。Excel 要先關掉。
 預設讀同一個資料夾的「今日日記.json」。
 日記檔會先找「NBA26-27_Quant_Betting_Journal (1).xlsx」。
+今日日記.json 可以放一天，也可以連續放很多天。按一次 bat 會依序全部寫入。
 同一天同一場次已存在時，只更新比分、讓分差、盤口結果和覆盤。沒有的場次加在流水帳最後。
 氣候只用：氣候A (放養紅利期)、氣候B (設局誘盤期)、氣候C (大收割日)、氣候D (冷卻重置期)。
 """
@@ -227,28 +228,56 @@ def choose_json(explicit: Path | None = None) -> Path:
     return path
 
 
-def load_package(path: Path) -> dict:
+def _reject_example(data: dict, path: Path) -> None:
+    if data.get("_範例") is True:
+        raise JournalError(
+            f"{path.name} 還是範例。請把 NotebookLM 的日期、比賽和文字貼進去，再刪掉 _範例 那一行。"
+        )
+
+
+def iter_json_values(raw: str, path: Path):
+    """依序讀出檔案裡的每一個 JSON。兩個物件接在一起也可以。"""
+    decoder = json.JSONDecoder()
+    index = 0
+    length = len(raw)
+    while index < length:
+        while index < length and raw[index] not in "{[":
+            index += 1
+        if index >= length:
+            return
+        try:
+            value, end = decoder.raw_decode(raw, index)
+        except json.JSONDecodeError as exc:
+            raise JournalError(
+                f"{path.name} 不是合法的 JSON。請檢查引號和逗號。第 {exc.lineno} 行附近：{exc.msg}"
+            ) from exc
+        yield value
+        index = end
+
+
+def load_packages(path: Path) -> list[dict]:
     raw = path.read_text(encoding="utf-8-sig").strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\s*```$", "", raw)
-    start = raw.find("{")
-    end = raw.rfind("}")
-    if start < 0 or end <= start:
-        raise JournalError(f"{path.name} 裡沒有 JSON。請貼一天的資料，最外層是大括號。")
-    try:
-        data = json.loads(raw[start:end + 1])
-    except json.JSONDecodeError as exc:
-        raise JournalError(
-            f"{path.name} 不是合法的 JSON。請檢查引號和逗號。第 {exc.lineno} 行附近：{exc.msg}"
-        ) from exc
-    if not isinstance(data, dict):
-        raise JournalError("請用一個日期的 JSON。不要用陣列一次放很多天。")
-    if data.get("_範例") is True:
-        raise JournalError(
-            "這份還是範例。請把 NotebookLM 的日期、比賽和文字貼進 今日日記.json，再刪掉 _範例 那一行。"
-        )
-    return data
+        raw = re.sub(r"\s*```\s*$", "", raw)
+    packages = []
+    for value in iter_json_values(raw, path):
+        items = value if isinstance(value, list) else [value]
+        for item in items:
+            if not isinstance(item, dict):
+                raise JournalError(f"{path.name} 裡有一份不是日期物件。每一天都要用大括號包起來。")
+            _reject_example(item, path)
+            packages.append(item)
+    if not packages:
+        raise JournalError(f"{path.name} 裡沒有 JSON。請貼一天或多天的資料，每一天最外層是大括號。")
+    return packages
+
+
+def load_package(path: Path) -> dict:
+    packages = load_packages(path)
+    if len(packages) != 1:
+        raise JournalError(f"{path.name} 裡有 {len(packages)} 天。")
+    return packages[0]
 
 
 def pick(data: dict, *names: str):
@@ -889,15 +918,20 @@ def other_workbooks(selected: Path, roots: list[Path] | None = None) -> list[Pat
 
 
 def run(json_path: Path, workbook: Path, dry_run: bool = False, roots: list[Path] | None = None) -> str:
-    package = normalize_package(load_package(json_path))
+    packages = [normalize_package(item) for item in load_packages(json_path)]
     selected, _ignored = choose_workbook(workbook, roots)
     others = other_workbooks(selected, roots)
     ensure_closed(selected)
     wb = load_workbook(selected)
-    plan = locate_rows(wb, package)
-    if not dry_run:
+    sections = []
+    for package in packages:
+        plan = locate_rows(wb, package)
         upsert_package(wb, package, plan)
-    text = describe(selected, json_path, package, plan, others)
+        sections.append(describe(selected, json_path, package, plan, others))
+    text = "\n\n".join(sections)
+    if len(packages) > 1:
+        days = "、".join(package["date"].isoformat() for package in packages)
+        text += f"\n這次一共 {len(packages)} 天，按一次就會全部寫入：{days}"
     if dry_run:
         text += "\n上面只是檢查，還沒寫入。"
         text += "\n確認日期和日記檔路徑後，回到這個視窗按一個鍵就會寫入。要取消就關掉視窗。"

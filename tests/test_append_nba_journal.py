@@ -137,6 +137,39 @@ class AppendJournalTests(unittest.TestCase):
         self.assertIsNone(package["games"][1]["margin"])
         self.assertIn("G4", package["warnings"][0])
 
+    def test_two_days_in_one_file_are_written_together(self):
+        second = sample_package()
+        second["date"] = "2026-11-05"
+        second["pre_game_text"] = "【2026-11-05 賽前分析】\n隔日。"
+        second["post_game_text"] = "【待賽後開獎復盤】"
+        second["games"] = [second["games"][0]]
+        second["games"][0]["outcome"] = "待結算"
+        second["games"][0]["score"] = "待開賽"
+        raw = json.dumps(sample_package(), ensure_ascii=False) + "\n" + json.dumps(second, ensure_ascii=False)
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            workbook = root / "NBA26-27_Quant_Betting_Journal (1).xlsx"
+            shutil.copy2(SOURCE, workbook)
+            payload = root / "今日日記.json"
+            payload.write_text("說明\n" + raw + "\n以上兩天。\n", encoding="utf-8")
+            text = journal.run(payload, workbook, dry_run=True, roots=[root])
+            self.assertIn("這次一共 2 天", text)
+            self.assertIn("2026-11-04", text)
+            self.assertIn("2026-11-05", text)
+            self.assertEqual(file_hash(workbook), file_hash(SOURCE))
+            journal.run(payload, workbook, dry_run=False, roots=[root])
+            saved = load_workbook(workbook)
+            master = saved["2_Master_Log"]
+            equity = saved["3_Equity_Timeline"]
+            self.assertEqual(journal.cell_date(master["A79"].value).isoformat(), "2026-11-04")
+            self.assertEqual(journal.cell_date(master["A80"].value).isoformat(), "2026-11-04")
+            self.assertEqual(journal.cell_date(master["A81"].value).isoformat(), "2026-11-05")
+            self.assertEqual(master["L81"].value, "待結算")
+            self.assertEqual(journal.cell_date(equity["A13"].value).isoformat(), "2026-11-04")
+            self.assertEqual(journal.cell_date(equity["A14"].value).isoformat(), "2026-11-05")
+            self.assertIsNone(equity["A15"].value)
+            saved.close()
+
     def test_duplicate_game_id_is_rejected(self):
         package = sample_package()
         package["games"][1]["場次"] = "G1"
