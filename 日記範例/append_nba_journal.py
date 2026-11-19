@@ -6,6 +6,7 @@
 日記檔會先找「NBA26-27_Quant_Betting_Journal (1).xlsx」。
 今日日記.json 可以放一天，也可以連續放很多天。按一次 bat 會依序全部寫入。
 同一天同一場次已存在時，只更新比分、讓分差、盤口結果和覆盤。沒有的場次加在流水帳最後。
+日誌每一天有兩列黃底寫自己的判斷。寫進賽前、賽後長文後面的句子，下次寫入會搬到黃底。
 氣候只用：氣候A (放養紅利期)、氣候B (設局誘盤期)、氣候C (大收割日)、氣候D (冷卻重置期)。
 """
 
@@ -36,6 +37,7 @@ ICE_ALT = "EDF3F9"
 GREEN = "E2EFDA"
 GREEN_ALT = "F4FBF2"
 WHITE = "FFFFFF"
+NOTE = "FFF2CC"
 LINE = "B0B7C3"
 FONT_NAME = "Calibri"
 
@@ -98,11 +100,15 @@ FILL_ICE_ALT = PatternFill("solid", fgColor=ICE_ALT)
 FILL_GREEN = PatternFill("solid", fgColor=GREEN)
 FILL_GREEN_ALT = PatternFill("solid", fgColor=GREEN_ALT)
 FILL_WHITE = PatternFill("solid", fgColor=WHITE)
+FILL_NOTE = PatternFill("solid", fgColor=NOTE)
 FILL_SECTION = PatternFill("solid", fgColor="2F5496")
 FONT_BODY = Font(name=FONT_NAME, size=11, color="1A1A1A")
 FONT_SECTION = Font(name=FONT_NAME, size=11, bold=True, color=WHITE)
 FONT_HEAD = Font(name=FONT_NAME, size=12, bold=True, color=WHITE)
 FONT_LINK = Font(name=FONT_NAME, size=11, bold=True, color=NAVY, underline="single")
+FONT_NOTE = Font(name=FONT_NAME, size=11, bold=True, color="7A5B00")
+NOTE_TITLE = "【自己的想法】寫在下面的黃底，一句一行。下次寫入不會蓋掉這裡。"
+NOTE_LINES = 2
 CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
 LEFT = Alignment(horizontal="left", vertical="center", wrap_text=True)
 TOP = Alignment(horizontal="left", vertical="top", wrap_text=True)
@@ -722,6 +728,55 @@ def _merge_text(ws, row: int, value, font, fill, align, height: int) -> None:
     ws.row_dimensions[row].height = height
 
 
+def note_blocks():
+    return [
+        (NOTE_TITLE, FONT_NOTE, FILL_NOTE, LEFT, 32),
+        *[(None, FONT_BODY, FILL_NOTE, TOP, 36) for _line in range(NOTE_LINES)],
+    ]
+
+
+def detached_note(old, new) -> str:
+    """長文後面多打的句子拆出來。手機不能在同一格換行，那句要挪到黃底。"""
+    if not isinstance(old, str):
+        return ""
+    old_text = old.replace("\r\n", "\n").strip()
+    new_text = str(new or "").replace("\r\n", "\n").strip()
+    if not old_text or not new_text or not old_text.startswith(new_text):
+        return ""
+    return old_text[len(new_text):].strip()
+
+
+def remember_note(ws, row: int, text: str) -> None:
+    if not text:
+        return
+    current = ws.cell(row, 2).value
+    current_text = current.strip() if isinstance(current, str) else ""
+    if text in current_text:
+        return
+    combined = f"{current_text}\n{text}".strip() if current_text else text
+    ws.cell(row, 2).value = combined
+    ws.cell(row, 2).alignment = TOP
+    ws.row_dimensions[row].height = max(36, text_height(combined))
+
+
+def write_note_block(ws, row: int, day) -> None:
+    for offset, (value, font, fill, align, height) in enumerate(note_blocks()):
+        put(ws.cell(row + offset, 1), day, FONT_BODY, fill, CENTER, "yyyy-mm-dd")
+        _merge_text(ws, row + offset, value, font, fill, align, height)
+
+
+def ensure_note_block(ws, header: int) -> int | None:
+    title = ws.cell(header + 5, 2).value
+    if isinstance(title, str) and title.startswith("【自己的想法】"):
+        return header + 6
+    link = ws.cell(header + 5, 2).value
+    if not (isinstance(link, str) and "HYPERLINK" in link.upper()):
+        return None
+    ws.insert_rows(header + 5, 1 + NOTE_LINES)
+    write_note_block(ws, header + 5, ws.cell(header, 1).value)
+    return header + 6
+
+
 def append_journal(ws, package: dict) -> int:
     row = journal_start(ws)
     day = package["date"]
@@ -732,11 +787,12 @@ def append_journal(ws, package: dict) -> int:
         (package["pre_game_text"], FONT_BODY, FILL_ICE, TOP, text_height(package["pre_game_text"])),
         ("【賽後對戰結算與復盤日誌】", FONT_SECTION, FILL_SECTION, Alignment(horizontal="left", vertical="center"), 22),
         (package["post_game_text"], FONT_BODY, FILL_GREEN, TOP, text_height(package["post_game_text"])),
+        *note_blocks(),
     ]
     for offset, (value, font, fill, align, height) in enumerate(blocks):
         put(ws.cell(row + offset, 1), day, FONT_HEAD if offset == 0 else FONT_BODY, fill, CENTER, "yyyy-mm-dd")
         _merge_text(ws, row + offset, value, font, fill, align, height)
-    link_row = row + 5
+    link_row = row + len(blocks)
     put(ws.cell(link_row, 1), day, FONT_BODY, FILL_WHITE, CENTER, "yyyy-mm-dd")
     put(
         ws.cell(link_row, 2),
@@ -814,11 +870,19 @@ def update_journal(ws, package: dict, header: int) -> None:
     pregame = package["pre_game_text"]
     postgame = package["post_game_text"]
     if ws.cell(header + 1, 2).value == "【賽前量化分析與對話推論】":
+        kept = detached_note(ws.cell(header + 2, 2).value, pregame)
+        kept_post = detached_note(ws.cell(header + 4, 2).value, postgame)
         ws.cell(header, 2).value = f"{day.isoformat()} | {package['climate']}"
         ws.cell(header + 2, 2).value = pregame
         ws.cell(header + 4, 2).value = postgame
+        ws.cell(header + 2, 2).alignment = TOP
+        ws.cell(header + 4, 2).alignment = TOP
         ws.row_dimensions[header + 2].height = text_height(pregame)
         ws.row_dimensions[header + 4].height = text_height(postgame)
+        note_row = ensure_note_block(ws, header)
+        if note_row is not None:
+            remember_note(ws, note_row, kept)
+            remember_note(ws, note_row, kept_post)
         return
     ws.cell(header, 2).value = f"日期 {day.isoformat()} | {package['climate']}"
     ws.cell(header + 1, 2).value = pregame
