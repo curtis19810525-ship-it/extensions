@@ -9,7 +9,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "日記範例" / "NBA26-27_Quant_Betting_Journal.xlsx"
@@ -136,6 +136,35 @@ class AppendJournalTests(unittest.TestCase):
         self.assertEqual(package["games"][1]["line_odds"], "C盤 0.825")
         self.assertIsNone(package["games"][1]["margin"])
         self.assertIn("G4", package["warnings"][0])
+
+    def test_sentence_stuck_on_the_long_text_moves_to_its_own_row(self):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "4_Daily_Journal"
+        package = journal.normalize_package(sample_package())
+        package["pre_game_text"] = "【2026-11-18 賽前量化診斷】\n全日 5 場。風控鎖倉。"
+        package["post_game_text"] = "【待賽後開獎復盤】"
+        rows = [
+            f"{package['date'].isoformat()} | {package['climate']}",
+            "【賽前量化分析與對話推論】",
+            package["pre_game_text"] + "Ai分析近期不準所以我決定反向投注。",
+            "【賽後對戰結算與復盤日誌】",
+            package["post_game_text"],
+            '=HYPERLINK("#\'3_Equity_Timeline\'!A1","⬆️ 返回時間軸總覽")',
+        ]
+        for offset, value in enumerate(rows):
+            ws.cell(3 + offset, 1).value = package["date"]
+            ws.cell(3 + offset, 2).value = value
+        journal.update_journal(ws, package, 3)
+        self.assertEqual(ws.cell(5, 2).value, package["pre_game_text"])
+        self.assertTrue(str(ws.cell(8, 2).value).startswith("【自己的想法】"))
+        self.assertIn("反向投注", ws.cell(9, 2).value)
+        self.assertIn("HYPERLINK", ws.cell(11, 2).value)
+        package["post_game_text"] = "賽後寫入。"
+        journal.update_journal(ws, package, 3)
+        self.assertIn("反向投注", ws.cell(9, 2).value)
+        self.assertEqual(ws.cell(7, 2).value, "賽後寫入。")
+        self.assertIn("HYPERLINK", ws.cell(11, 2).value)
 
     def test_two_days_in_one_file_are_written_together(self):
         second = sample_package()
@@ -264,7 +293,9 @@ class AppendJournalTests(unittest.TestCase):
             self.assertIn("賽前分析", cards["B55"].value)
             self.assertEqual(cards["B56"].value, "【賽後對戰結算與復盤日誌】")
             self.assertIn("賽後覆盤", cards["B57"].value)
-            self.assertIn("3_Equity_Timeline", cards["B58"].value)
+            self.assertTrue(str(cards["B58"].value).startswith("【自己的想法】"))
+            self.assertIsNone(cards["B59"].value)
+            self.assertIn("3_Equity_Timeline", cards["B61"].value)
             self.assertIn("B53:I53", {str(merged) for merged in cards.merged_cells.ranges})
             saved.close()
 
