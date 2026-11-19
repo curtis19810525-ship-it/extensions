@@ -4,15 +4,17 @@ echo ============================================================
 echo NBA 回家日常
 echo ============================================================
 echo.
-echo 請放在「抓取NBA網路資料」，與 run_all.py 同一層。
-echo 請先關閉 NBA26-27爬蟲數據.xlsx。
+echo 請先關閉 Excel：
+echo   NBA26-27爬蟲數據.xlsx
+echo   玖九盤口變化.xlsx
+echo   盤口觀察.xlsx
 echo.
-echo 賽果日跑步驟 1～3 後歸檔。關注日跑步驟 4～6 後改總表日期。
-echo 不填盤口。版面對不上時不寫格子。
-echo 手動選單仍用 爬蟲正負各隊.bat。
-echo.
+if not exist "%~dp0home_pipeline.py" (
+echo 找不到 home_pipeline.py，請放在這個 bat 的同一層。
+pause
+exit /b 1
+)
 chcp 65001 >nul
-python "%~dp0nba_home.py"
-python "%~dp0merge_daily_report.py"
+python "%~dp0home_pipeline.py"
 echo.
 pause
