@@ -3,7 +3,7 @@
 
 雙擊「寫入量化日記.bat」。Excel 要先關掉。
 預設讀同一個資料夾的「今日日記.json」。
-日記檔會先找「NBA26-27_Quant_Betting_Journal (1).xlsx」。
+日記檔會先找「NBA26-27分析及日記.xlsx」。
 今日日記.json 可以放一天，也可以連續放很多天。按一次 bat 會依序全部寫入。
 同一天同一場次已存在時，只更新比分、讓分差、盤口結果和覆盤。沒有的場次加在流水帳最後。
 日誌每一天有兩列黃底寫自己的判斷。寫進賽前、賽後長文後面的句子，下次寫入會搬到黃底。
@@ -24,6 +24,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 WORKBOOK_NAMES = (
+    "NBA26-27分析及日記.xlsx",
     "NBA26-27_Quant_Betting_Journal (1).xlsx",
     "NBA26-27_Quant_Betting_Journal.xlsx",
 )
@@ -213,7 +214,7 @@ def choose_workbook(
     if not found:
         places = "\n".join(f"  {root}" for root in (roots or search_roots()))
         raise JournalError(
-            "找不到量化日記。請把 NBA26-27_Quant_Betting_Journal (1).xlsx 放到這支 bat 旁邊，\n"
+            "找不到量化日記。請把 NBA26-27分析及日記.xlsx 放到這支 bat 旁邊，\n"
             "或把完整路徑寫進同一個資料夾的 日記路徑.txt。\n"
             f"有找過：\n{places}"
         )
