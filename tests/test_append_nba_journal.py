@@ -205,6 +205,17 @@ class AppendJournalTests(unittest.TestCase):
         with self.assertRaises(journal.JournalError):
             journal.normalize_package(package)
 
+    def test_prefers_renamed_journal(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            renamed = root / "NBA26-27分析及日記.xlsx"
+            old = root / "NBA26-27_Quant_Betting_Journal (1).xlsx"
+            renamed.write_bytes(b"new")
+            old.write_bytes(b"old")
+            chosen, others = journal.choose_workbook(roots=[root])
+            self.assertEqual(chosen, renamed)
+            self.assertEqual(others, [old])
+
     def test_prefers_downloaded_copy_name(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
