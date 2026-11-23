@@ -34,8 +34,10 @@ class GradeTests(unittest.TestCase):
         self.assertEqual(pick.grade_pick("活塞讓2.5分", "老鷹", "活塞", -3)["d"], "預測成功")
 
     def test_display_token_follows_header_when_unsigned(self):
-        self.assertEqual(pick.signed_from_display("(7+50)0.95", "老鷹", "老鷹受讓"), -7.5)
-        self.assertEqual(pick.signed_from_display("(14.5)0.9", "湖人", "湖人讓分"), 14.5)
+        self.assertEqual(pick.signed_from_display("(7+50)0.95", "老鷹", "老鷹受讓"), -7)
+        self.assertEqual(pick.signed_from_display("(2-25)0.95", "老鷹", "老鷹受讓"), -2)
+        self.assertEqual(pick.signed_from_display("(2.5)0.95", "湖人", "湖人讓分"), 2.5)
+        self.assertEqual(pick.parse_spread_token("0.95"), None)
         self.assertEqual(pick.parse_spread_token("(-3.5)0.9"), -3.5)
 
     def test_base_pick_strips_result_mark(self):
@@ -57,6 +59,26 @@ def build_game(ws):
 
 
 class SheetTests(unittest.TestCase):
+    def test_phone_sheet_reads_the_spread_not_the_price(self):
+        wb = Workbook()
+        ws = wb.active
+        ws["A1"] = "11-23 04:30 底特律活塞 @ 亞特蘭大老鷹(主)"
+        ws["A2"] = "時間"
+        ws["B2"] = "老鷹（主）"
+        ws["C2"] = "活塞"
+        ws["D2"] = "老鷹受讓"
+        ws["E2"] = "活塞讓分"
+        ws["A3"] = "11-23 04:02"
+        ws["D3"] = 0.95
+        ws["E3"] = "(2-25)0.95"
+        title = ws["A1"].value
+        pick.render_pick(ws, title, 4, {title: {}}, 12)
+        self.assertEqual(ws["A4"].value, "賽前預測")
+        formula = ws.data_validations.dataValidation[0].formula1
+        self.assertIn("活塞讓2分", formula)
+        self.assertIn("老鷹受讓2分", formula)
+        self.assertNotIn("0.95", formula)
+
     def test_menu_before_game_and_grade_after(self):
         wb = Workbook()
         ws = wb.active

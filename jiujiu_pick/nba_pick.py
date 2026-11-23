@@ -47,29 +47,29 @@ def format_points(value: float) -> str:
     return f"{number:.2f}".rstrip("0").rstrip(".")
 
 
+def _is_quarter_line(number: float) -> bool:
+    quarters = abs(float(number)) * 4
+    return abs(quarters - round(quarters)) < 1e-6
+
+
 def parse_spread_token(token):
-    """從儲存格文字取出讓分。正數代表主隊讓分。(7+50) 視為 7.5。"""
+    """取出球頭。括號裡的 +50、-25 是剛好贏到該分時的輸贏成數，不是再加減分數。
+
+    (2-25)0.95 的球頭是 2，0.95 是水位。(2.5) 的球頭是 2.5。
+    單獨的 0.95 是水位，不當成讓分。
+    """
     if isinstance(token, bool) or token is None:
         return None
     if isinstance(token, (int, float)):
-        return float(token)
-    text = str(token).strip()
-    if not text:
+        number = float(token)
+        if _is_quarter_line(number):
+            return number
         return None
-    matched = re.search(r"\(([+-]?\d+(?:\.\d+)?)(\+50|-50)?\)", text)
-    if matched:
-        base = float(matched.group(1))
-        if matched.group(2) == "+50":
-            base += 0.5 if base >= 0 else -0.5
-        return base
-    matched = re.search(r"([+-]?\d+(?:\.\d+)?)\+50", text)
-    if matched:
-        base = float(matched.group(1))
-        return base + (0.5 if base >= 0 else -0.5)
-    matched = re.search(r"[+-]?\d+(?:\.\d+)?", text)
-    if matched:
-        return float(matched.group(0))
-    return None
+    text = str(token).strip()
+    matched = re.search(r"\(([+-]?\d+(?:\.\d+)?)(?:[+-]\d+)?\)", text)
+    if not matched:
+        return None
+    return float(matched.group(1))
 
 
 def parse_pick(value):
@@ -256,13 +256,18 @@ def read_latest_line(ws, pick_row: int):
         marker = str(ws.cell(row, 1).value or "").strip()
         if marker in NOTE_LABELS or marker == PICK_LABEL:
             continue
-        if spread_col:
+        points = None
+        for col in range(4, 16):
+            points = parse_spread_token(ws.cell(row, col).value)
+            if points is not None and "(" in str(ws.cell(row, col).value or ""):
+                break
+            points = None
+        if points is None and spread_col:
             raw = ws.cell(row, spread_col).value
-            if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+            if isinstance(raw, (int, float)) and not isinstance(raw, bool) and _is_quarter_line(float(raw)):
                 return home, away, float(raw)
-        signed = signed_from_display(ws.cell(row, 4).value, home, header_d)
-        if signed is not None:
-            return home, away, signed
+        if points is not None:
+            return home, away, signed_from_display(points, home, header_d)
     return home, away, None
 
 
@@ -472,7 +477,10 @@ def archive_picks(wb, game_notes):
 def selftest():
     assert format_points(2) == "2"
     assert format_points(14.5) == "14.5"
-    assert parse_spread_token("(7+50)") == 7.5
+    assert parse_spread_token("(7+50)") == 7
+    assert parse_spread_token("(2-25)0.95") == 2
+    assert parse_spread_token("(2.5)0.95") == 2.5
+    assert parse_spread_token("0.95") is None
     assert parse_spread_token("(-2)0.9") == -2
     assert base_pick("活塞讓2分贏") == "活塞讓2分"
     assert menu_options("老鷹", "活塞", -2) == ["老鷹受讓2分", "活塞讓2分"]
