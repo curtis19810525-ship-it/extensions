@@ -212,6 +212,31 @@ class InstallTests(unittest.TestCase):
                 sys.path.remove(str(root))
                 sys.modules.pop("nba_pick", None)
 
+    def test_wrapper_accepts_row_before_title(self):
+        notes_text = FAKE_NOTES.replace(
+            "def write_game_notes(ws, title, row, game_notes, last_col):",
+            "def write_game_notes(ws, row, title, game_notes, last_col):",
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "nba_game_notes.py").write_text(notes_text, encoding="utf-8")
+            apply.install(root, PICK)
+            sys.path.insert(0, str(root))
+            try:
+                notes = load("nba_game_notes_row_first", root / "nba_game_notes.py")
+                wb = Workbook()
+                ws = wb.active
+                build_game(ws)
+                title = "11-23 04:30 活塞 @ 老鷹(主)"
+                game_notes = {title: {"賽前預測": "活塞讓2分"}}
+                notes.write_game_notes(ws, 4, title, game_notes, 12)
+                self.assertEqual(ws["A4"].value, "賽前預測")
+                self.assertEqual(ws["A5"].value, "賽前想法")
+                self.assertEqual(ws["B4"].value, "活塞讓2分贏")
+            finally:
+                sys.path.remove(str(root))
+                sys.modules.pop("nba_pick", None)
+
 
 if __name__ == "__main__":
     unittest.main()

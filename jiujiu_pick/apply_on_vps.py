@@ -41,16 +41,26 @@ def _nba_pick_put(game_notes, saved):
 
 
 def write_game_notes(*args, **kwargs):
-    row = args[2] if len(args) > 2 else kwargs.get("row")
-    title = args[1] if len(args) > 1 else kwargs.get("title")
     ws = args[0] if args else kwargs.get("ws")
     game_notes = args[3] if len(args) > 3 else kwargs.get("game_notes")
     last_col = args[4] if len(args) > 4 else kwargs.get("last_col")
+    second = args[1] if len(args) > 1 else None
+    third = args[2] if len(args) > 2 else None
+    row_index = None
+    if isinstance(second, int):
+        row, title = second, third
+        row_index = 1
+    elif isinstance(third, int):
+        title, row = second, third
+        row_index = 2
+    else:
+        row = kwargs.get("row")
+        title = second if second is not None else kwargs.get("title")
     call_args = list(args)
     call_kwargs = dict(kwargs)
     if isinstance(row, int):
-        if len(call_args) > 2:
-            call_args[2] = row + 1
+        if row_index is not None and len(call_args) > row_index:
+            call_args[row_index] = row + 1
         elif "row" in call_kwargs:
             call_kwargs["row"] = row + 1
     saved = _nba_pick_pop(game_notes)
@@ -124,6 +134,13 @@ def install(root: Path, module_source: Path) -> str:
             text += "\n"
         notes.write_text(text + "\n" + WRAPPER.lstrip("\n"), encoding="utf-8")
         print(f"已掛上賽前預測，備份 {backup.name}")
+    elif "row_index" not in text:
+        stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        backup = notes.with_name(f"nba_game_notes.py.bak-pick-{stamp}")
+        shutil.copy2(notes, backup)
+        head = text.split("# " + MARKER, 1)[0].rstrip()
+        notes.write_text(head + "\n\n" + WRAPPER.lstrip("\n"), encoding="utf-8")
+        print(f"已更新賽前預測參數順序，備份 {backup.name}")
     else:
         print("賽前預測已經掛過，只更新 nba_pick.py")
     try:
