@@ -399,7 +399,55 @@ def _write_side(ws, row, pick_col, saved, graded, options):
     _add_menu(ws, pick_cell, menu)
 
 
+def _generic_spread_header(value) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if text in {"讓分", "受讓", "讓分A"}:
+        return True
+    return text.startswith(("主讓", "客讓", "主受", "客受"))
+
+
+def _spread_cell(value) -> bool:
+    return parse_spread_token(value) is not None and "(" in str(value or "")
+
+
+def label_spread_headers(ws, pick_row: int):
+    """主隊讓分時，D/E 仍可能停在「主讓分／客讓分」。用最後一筆有球頭的列改成隊名。"""
+    header = find_header_row(ws, pick_row)
+    if header is None:
+        return
+    home = strip_role(ws.cell(header, 2).value)
+    away = strip_role(ws.cell(header, 3).value)
+    if not home or not away:
+        return
+    home_header = ws.cell(header, 4).value
+    away_header = ws.cell(header, 5).value
+    if not (_generic_spread_header(home_header) or _generic_spread_header(away_header)):
+        return
+    latest = None
+    for row in range(pick_row - 1, header, -1):
+        marker = str(ws.cell(row, 1).value or "").strip()
+        second = str(ws.cell(row, 2).value or "").strip()
+        if marker in NOTE_LABELS or marker == PICK_LABEL or second == AI_KEY:
+            continue
+        left = ws.cell(row, 4).value
+        right = ws.cell(row, 5).value
+        if _spread_cell(left) or _spread_cell(right):
+            latest = (left, right)
+            break
+    if latest is None:
+        return
+    if _spread_cell(latest[0]) and not _spread_cell(latest[1]):
+        ws.cell(header, 4).value = f"{home}讓分"
+        ws.cell(header, 5).value = f"{away}受讓"
+    elif _spread_cell(latest[1]) and not _spread_cell(latest[0]):
+        ws.cell(header, 4).value = f"{home}受讓"
+        ws.cell(header, 5).value = f"{away}讓分"
+
+
 def render_pick(ws, title, row, game_notes, last_col=None):
+    label_spread_headers(ws, row)
     home, away, signed, suffix, on_home = read_latest_line(ws, row)
     options = menu_options(home, away, signed, suffix, on_home)
     result = result_below(ws, row)

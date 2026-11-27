@@ -188,6 +188,52 @@ class SheetTests(unittest.TestCase):
         pick.merge_picks(book, restored)
         self.assertEqual(restored[title]["賽前預測"], "活塞讓2分")
 
+    def test_home_favorite_headers_name_the_teams(self):
+        wb = Workbook()
+        ws = wb.active
+        title = "11-28 08:00 邁阿密熱火 @ 紐約尼克(主)"
+        ws["A1"] = title
+        ws["A2"] = "時間"
+        ws["B2"] = "尼克 (主)"
+        ws["C2"] = "熱火"
+        ws["D2"] = "主讓分"
+        ws["E2"] = "客讓分"
+        ws["A3"] = "11-27 12:02"
+        ws["D3"] = "(4+50)0.95"
+        ws["E3"] = "0.95"
+        ws["A4"] = "11-27 15:02"
+        ws["D4"] = "(3.5)0.95"
+        ws["E4"] = 0.95
+        pick.render_pick(ws, title, 5, {title: {}}, 12)
+        self.assertEqual(ws["D2"].value, "尼克讓分")
+        self.assertEqual(ws["E2"].value, "熱火受讓")
+        formula = ws.data_validations.dataValidation[0].formula1
+        self.assertIn("尼克讓3.5分", formula)
+        self.assertIn("熱火受讓3.5分", formula)
+
+    def test_away_favorite_placeholder_and_named_headers(self):
+        wb = Workbook()
+        ws = wb.active
+        title = "11-26 11:00 聖安東尼奧馬刺 @ 波特蘭拓荒者(主)"
+        ws["A1"] = title
+        ws["A2"] = "時間"
+        ws["B2"] = "拓荒者 (主)"
+        ws["C2"] = "馬刺"
+        ws["D2"] = "主讓分A"
+        ws["E2"] = "客讓分"
+        ws["A3"] = "11-26 03:02"
+        ws["D3"] = 0.95
+        ws["E3"] = "(3+25)0.95"
+        pick.render_pick(ws, title, 4, {title: {}}, 12)
+        self.assertEqual(ws["D2"].value, "拓荒者受讓")
+        self.assertEqual(ws["E2"].value, "馬刺讓分")
+
+        ws["D2"] = "拓荒者受讓"
+        ws["E2"] = "馬刺讓"
+        pick.render_pick(ws, title, 4, {title: {}}, 12)
+        self.assertEqual(ws["D2"].value, "拓荒者受讓")
+        self.assertEqual(ws["E2"].value, "馬刺讓")
+
     def test_archive_fits_note_text_and_draws_a_day_line(self):
         wb = Workbook()
         ws = wb.active
