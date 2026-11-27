@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""賽前預測：下拉選讓分邊，賽後在同一列寫出贏輸與顏色。"""
+"""賽前預測：AI 與我的推薦各一組選單，賽後分別寫出分差與顏色。"""
 
 from __future__ import annotations
 
@@ -9,10 +9,21 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 
 PICK_LABEL = "賽前預測"
+AI_KEY = "AI推薦"
+MINE_KEY = "我的推薦"
+LEGACY_KEY = "賽前預測"
 NOTE_LABELS = ("賽前想法", "比賽結果", "賽後想法")
-SUCCESS = "預測成功"
+SUCCESS = "預測正確"
 FAIL = "預測失敗"
 PUSH = "預測走盤"
+HEADER_LABELS = (
+    (2, "AI推薦"),
+    (3, "賽後結果"),
+    (4, "預測結果"),
+    (5, "我的推薦"),
+    (6, "賽後結果"),
+    (7, "預測結果"),
+)
 
 LABEL_FONT = Font(bold=True, size=14, color="1F4E79")
 VALUE_FONT = Font(size=16, color="000000")
@@ -36,7 +47,9 @@ STATUS_STYLE = {
     PUSH: (PUSH_FILL, PUSH_FONT),
 }
 PICK_RE = re.compile(
-    r"^(?P<team>.+?)(?P<side>受讓|讓)(?P<pts>\d+(?:\.\d+)?)分(?P<mark>贏|輸|走)?$"
+    r"^(?P<team>.+?)(?P<side>受讓|讓)(?P<pts>\d+(?:\.\d+)?)分"
+    r"(?P<tail>(?:[+-](?:25|50|75)|贏(?:25|50|75)|輸(?:25|50|75)))?"
+    r"(?P<mark>贏|輸|走)?$"
 )
 
 
@@ -85,7 +98,25 @@ def base_pick(value) -> str:
     parsed = parse_pick(value)
     if not parsed:
         return ""
-    return f"{parsed['team']}{parsed['side']}{parsed['pts']}分"
+    return f"{parsed['team']}{parsed['side']}{parsed['pts']}分{parsed.get('tail') or ''}"
+
+
+def settlement_suffix(token) -> str:
+    matched = re.search(r"\([+-]?\d+(?:\.\d+)?([+-])(25|50|75)\)", str(token or ""))
+    if not matched:
+        return ""
+    return matched.group(1) + matched.group(2)
+
+
+def flip_suffix(suffix: str) -> str:
+    if not suffix:
+        return ""
+    number = suffix[1:]
+    if suffix[0] == "-":
+        return f"贏{number}"
+    if suffix[0] == "+":
+        return f"輸{number}"
+    return ""
 
 
 def strip_role(value) -> str:
@@ -93,15 +124,20 @@ def strip_role(value) -> str:
     return text.replace("（主）", "").replace("(主)", "").strip()
 
 
-def menu_options(home: str, away: str, signed_home):
+def menu_options(home: str, away: str, signed_home, suffix="", suffix_on_home=True):
     if signed_home is None or not home or not away:
         return []
     points = format_points(signed_home)
-    if float(signed_home) > 0:
-        return [f"{home}讓{points}分", f"{away}受讓{points}分"]
-    if float(signed_home) < 0:
-        return [f"{home}受讓{points}分", f"{away}讓{points}分"]
-    return [f"{home}讓0分", f"{away}受讓0分"]
+    home_lays = float(signed_home) > 0 or float(signed_home) == 0
+    if home_lays:
+        lay_team, dog_team = home, away
+        raw_on_lay = bool(suffix_on_home)
+    else:
+        lay_team, dog_team = away, home
+        raw_on_lay = not bool(suffix_on_home)
+    lay_tail = suffix if raw_on_lay else flip_suffix(suffix)
+    dog_tail = flip_suffix(suffix) if raw_on_lay else suffix
+    return [f"{lay_team}讓{points}分{lay_tail}", f"{dog_team}受讓{points}分{dog_tail}"]
 
 
 def judge(margin: float, side: str, points: float) -> str:
@@ -178,30 +214,41 @@ def grade_pick(pick, home: str, away: str, home_margin: float):
     }
 
 
-def lookup_pick(game_notes, title: str) -> str:
+def _slot_for(game_notes, title: str):
     if not isinstance(game_notes, dict):
-        return ""
+        return None
     title = str(title or "").strip()
     exact = game_notes.get(title)
-    if isinstance(exact, dict) and "賽前預測" in exact:
-        return base_pick(exact.get("賽前預測"))
+    if isinstance(exact, dict):
+        return exact
     for key, slot in game_notes.items():
-        if not isinstance(slot, dict) or "賽前預測" not in slot:
-            continue
         key_text = str(key or "").strip()
-        if key_text and (key_text == title or key_text in title or title in key_text):
-            return base_pick(slot.get("賽前預測"))
+        if isinstance(slot, dict) and key_text and (key_text == title or key_text in title or title in key_text):
+            return slot
+    return None
+
+
+def lookup_pick(game_notes, title: str, key: str = MINE_KEY) -> str:
+    slot = _slot_for(game_notes, title)
+    if not isinstance(slot, dict):
+        return ""
+    if key in slot and slot.get(key):
+        return base_pick(slot.get(key))
+    if key == MINE_KEY:
+        return base_pick(slot.get(LEGACY_KEY))
     return ""
 
 
-def remember_pick(game_notes, title: str, pick: str):
+def remember_pick(game_notes, title: str, pick: str, key: str = MINE_KEY):
     if not isinstance(game_notes, dict):
         return
     slot = game_notes.get(title)
     if not isinstance(slot, dict):
         slot = {}
         game_notes[title] = slot
-    slot["賽前預測"] = pick
+    slot[key] = pick
+    if key == MINE_KEY:
+        slot[LEGACY_KEY] = pick
 
 
 def find_header_row(ws, pick_row: int):
@@ -244,31 +291,43 @@ def signed_from_display(token, home: str, header_d: str):
     return abs(number)
 
 
+def _line_from_token(ws, header, col, raw, home, away):
+    header_text = ws.cell(header, col).value
+    suffix = settlement_suffix(raw)
+    if col == 4 or (home and home in str(header_text or "")):
+        return signed_from_display(raw, home, header_text), suffix, True
+    away_signed = signed_from_display(raw, away, header_text)
+    signed = None if away_signed is None else -float(away_signed)
+    return signed, suffix, False
+
+
 def read_latest_line(ws, pick_row: int):
     header = find_header_row(ws, pick_row)
     if header is None:
-        return "", "", None
+        return "", "", None, "", True
     home = strip_role(ws.cell(header, 2).value)
     away = strip_role(ws.cell(header, 3).value)
     spread_col = find_spread_column(ws, header)
-    header_d = ws.cell(header, 4).value
     for row in range(pick_row - 1, header, -1):
         marker = str(ws.cell(row, 1).value or "").strip()
-        if marker in NOTE_LABELS or marker == PICK_LABEL:
+        second = str(ws.cell(row, 2).value or "").strip()
+        if marker in NOTE_LABELS or marker == PICK_LABEL or second == AI_KEY:
             continue
-        points = None
+        found = None
         for col in range(4, 16):
-            points = parse_spread_token(ws.cell(row, col).value)
-            if points is not None and "(" in str(ws.cell(row, col).value or ""):
+            raw = ws.cell(row, col).value
+            points = parse_spread_token(raw)
+            if points is not None and "(" in str(raw or ""):
+                found = (col, raw)
                 break
-            points = None
-        if points is None and spread_col:
+        if found is None and spread_col:
             raw = ws.cell(row, spread_col).value
             if isinstance(raw, (int, float)) and not isinstance(raw, bool) and _is_quarter_line(float(raw)):
-                return home, away, float(raw)
-        if points is not None:
-            return home, away, signed_from_display(points, home, header_d)
-    return home, away, None
+                return home, away, float(raw), "", True
+        if found is not None:
+            signed, suffix, on_home = _line_from_token(ws, header, found[0], found[1], home, away)
+            return home, away, signed, suffix, on_home
+    return home, away, None, "", True
 
 
 def result_below(ws, pick_row: int):
@@ -309,33 +368,13 @@ def _add_menu(ws, cell, options):
     check.add(cell)
 
 
-def render_pick(ws, title, row, game_notes, last_col=None):
-    saved = lookup_pick(game_notes, title)
-    home, away, signed = read_latest_line(ws, row)
-    options = menu_options(home, away, signed)
-    result = result_below(ws, row)
-    if not result and isinstance(game_notes, dict):
-        slot = game_notes.get(title)
-        if isinstance(slot, dict):
-            result = slot.get("比賽結果")
-    graded = None
-    if saved:
-        margin = resolve_home_margin(result, home, away)
-        graded = grade_pick(saved, home, away, margin) if margin is not None else None
-
-    ws.row_dimensions[row].height = 48
-    label = ws.cell(row, 1, PICK_LABEL)
-    label.font = LABEL_FONT
-    label.fill = LABEL_FILL
-    _apply_border(label)
-
-    pick_cell = ws.cell(row, 2, graded["b"] if graded else (saved or None))
+def _write_side(ws, row, pick_col, saved, graded, options):
+    pick_cell = ws.cell(row, pick_col, saved or None)
     pick_cell.font = VALUE_FONT
     pick_cell.fill = PatternFill(fill_type=None)
     _apply_border(pick_cell)
-
-    margin_cell = ws.cell(row, 3)
-    status_cell = ws.cell(row, 4)
+    margin_cell = ws.cell(row, pick_col + 1)
+    status_cell = ws.cell(row, pick_col + 2)
     if graded:
         margin_cell.value = graded["c"]
         margin_cell.font = VALUE_FONT
@@ -346,17 +385,46 @@ def render_pick(ws, title, row, game_notes, last_col=None):
         status_cell.fill = fill
         status_cell.font = font
         _apply_border(status_cell)
-    else:
-        _clear_status(margin_cell)
-        _clear_status(status_cell)
-        menu = list(options)
-        if saved and saved not in menu:
-            menu.insert(0, saved)
-        _add_menu(ws, pick_cell, menu)
+        return
+    _clear_status(margin_cell)
+    _clear_status(status_cell)
+    menu = list(options)
+    if saved and saved not in menu:
+        menu.insert(0, saved)
+    _add_menu(ws, pick_cell, menu)
 
-    if saved:
-        remember_pick(game_notes, title, saved)
-    return row + 1
+
+def render_pick(ws, title, row, game_notes, last_col=None):
+    home, away, signed, suffix, on_home = read_latest_line(ws, row)
+    options = menu_options(home, away, signed, suffix, on_home)
+    result = result_below(ws, row)
+    if not result and isinstance(game_notes, dict):
+        slot = game_notes.get(title)
+        if isinstance(slot, dict):
+            result = slot.get("比賽結果")
+    margin = resolve_home_margin(result, home, away)
+
+    ws.row_dimensions[row].height = 32
+    label = ws.cell(row, 1, PICK_LABEL)
+    label.font = LABEL_FONT
+    label.fill = LABEL_FILL
+    _apply_border(label)
+    for col, text in HEADER_LABELS:
+        cell = ws.cell(row, col, text)
+        cell.font = LABEL_FONT
+        cell.fill = LABEL_FILL
+        _apply_border(cell)
+
+    value_row = row + 1
+    ws.row_dimensions[value_row].height = 48
+    ws.cell(value_row, 1).value = None
+    for key, col in ((AI_KEY, 2), (MINE_KEY, 5)):
+        saved = lookup_pick(game_notes, title, key)
+        graded = grade_pick(saved, home, away, margin) if saved and margin is not None else None
+        _write_side(ws, value_row, col, saved, graded, options)
+        if saved:
+            remember_pick(game_notes, title, saved, key)
+    return value_row + 1
 
 
 def _title_above(ws, row: int):
@@ -381,10 +449,16 @@ def merge_picks(wb, notes):
             current = text
         if marker == PICK_LABEL and current:
             seen.add(current)
-            raw = ws.cell(row, 2).value
             slot = notes.setdefault(current, {})
-            if isinstance(slot, dict):
-                slot["賽前預測"] = base_pick(raw) if raw else ""
+            if not isinstance(slot, dict):
+                continue
+            if str(ws.cell(row, 2).value or "") == AI_KEY:
+                slot[AI_KEY] = base_pick(ws.cell(row + 1, 2).value)
+                slot[MINE_KEY] = base_pick(ws.cell(row + 1, 5).value)
+                slot[LEGACY_KEY] = slot[MINE_KEY]
+            else:
+                slot[MINE_KEY] = base_pick(ws.cell(row, 2).value)
+                slot[LEGACY_KEY] = slot[MINE_KEY]
     archive_into(notes, wb, seen)
     return notes
 
@@ -408,15 +482,15 @@ def _archive_layout(ws):
     return header_row, title_col
 
 
-def _pick_column(ws, header_row: int, create: bool):
+def _named_column(ws, header_row: int, name: str, create: bool):
     last = ws.max_column or 1
     for col in range(1, last + 1):
-        if ws.cell(header_row, col).value == PICK_LABEL:
+        if ws.cell(header_row, col).value == name:
             return col
     if not create:
         return None
     col = last + 1
-    cell = ws.cell(header_row, col, PICK_LABEL)
+    cell = ws.cell(header_row, col, name)
     cell.font = LABEL_FONT
     return col
 
@@ -426,19 +500,28 @@ def archive_into(notes, wb, seen):
         return
     ws = wb["賽事筆記"]
     header_row, title_col = _archive_layout(ws)
-    pick_col = _pick_column(ws, header_row, create=False) if header_row else None
-    if not header_row or not pick_col:
+    if not header_row:
+        return
+    ai_col = _named_column(ws, header_row, AI_KEY, create=False)
+    mine_col = _named_column(ws, header_row, MINE_KEY, create=False)
+    legacy_col = _named_column(ws, header_row, LEGACY_KEY, create=False)
+    if not ai_col and not mine_col and not legacy_col:
         return
     for row in range(header_row + 1, (ws.max_row or header_row) + 1):
         title = str(ws.cell(row, title_col).value or "").strip()
         if not title or title in seen:
             continue
-        pick = base_pick(ws.cell(row, pick_col).value)
-        if not pick:
-            continue
         slot = notes.setdefault(title, {})
-        if isinstance(slot, dict) and not slot.get("賽前預測"):
-            slot["賽前預測"] = pick
+        if not isinstance(slot, dict):
+            continue
+        if ai_col and not slot.get(AI_KEY):
+            slot[AI_KEY] = base_pick(ws.cell(row, ai_col).value)
+        mine = base_pick(ws.cell(row, mine_col).value) if mine_col else ""
+        if not mine and legacy_col:
+            mine = base_pick(ws.cell(row, legacy_col).value)
+        if mine and not slot.get(MINE_KEY):
+            slot[MINE_KEY] = mine
+            slot[LEGACY_KEY] = mine
 
 
 def archive_picks(wb, game_notes):
@@ -448,16 +531,24 @@ def archive_picks(wb, game_notes):
     header_row, title_col = _archive_layout(ws)
     if not header_row:
         return
-    pick_col = _pick_column(ws, header_row, create=True)
+    columns = {
+        AI_KEY: _named_column(ws, header_row, AI_KEY, create=True),
+        MINE_KEY: _named_column(ws, header_row, MINE_KEY, create=True),
+    }
     rows = {}
     for row in range(header_row + 1, (ws.max_row or header_row) + 1):
         title = str(ws.cell(row, title_col).value or "").strip()
         if title:
             rows[title] = row
     for title, slot in game_notes.items():
-        if not isinstance(slot, dict) or "賽前預測" not in slot:
+        if not isinstance(slot, dict):
             continue
-        pick = base_pick(slot.get("賽前預測"))
+        if AI_KEY not in slot and MINE_KEY not in slot and LEGACY_KEY not in slot:
+            continue
+        stored = {
+            AI_KEY: base_pick(slot.get(AI_KEY)),
+            MINE_KEY: base_pick(slot.get(MINE_KEY) or slot.get(LEGACY_KEY)),
+        }
         title_text = str(title).strip()
         target = rows.get(title_text)
         if target is None:
@@ -466,12 +557,13 @@ def archive_picks(wb, game_notes):
                     target = row
                     break
         if target is None:
-            if not pick:
+            if not stored[AI_KEY] and not stored[MINE_KEY]:
                 continue
             target = (ws.max_row or header_row) + 1
             ws.cell(target, title_col, title_text)
             rows[title_text] = target
-        ws.cell(target, pick_col, pick or None)
+        for key, col in columns.items():
+            ws.cell(target, col, stored[key] or None)
 
 
 def selftest():
@@ -483,7 +575,14 @@ def selftest():
     assert parse_spread_token("0.95") is None
     assert parse_spread_token("(-2)0.9") == -2
     assert base_pick("活塞讓2分贏") == "活塞讓2分"
-    assert menu_options("老鷹", "活塞", -2) == ["老鷹受讓2分", "活塞讓2分"]
+    assert base_pick("快艇受讓7分贏25") == "快艇受讓7分贏25"
+    assert base_pick("灰熊讓7分-25") == "灰熊讓7分-25"
+    assert menu_options("老鷹", "活塞", -2) == ["活塞讓2分", "老鷹受讓2分"]
+    assert menu_options("灰熊", "快艇", 7, "-25", True) == ["灰熊讓7分-25", "快艇受讓7分贏25"]
+    covered = grade_pick("灰熊讓7分-25", "灰熊", "快艇", 18)
+    assert covered["c"] == "灰熊贏18分" and covered["d"] == SUCCESS
+    missed = grade_pick("快艇受讓7分贏25", "灰熊", "快艇", 18)
+    assert missed["c"] == "快艇輸18分" and missed["d"] == FAIL
 
     win = grade_pick("活塞讓2分", "老鷹", "活塞", -5)
     assert win["b"] == "活塞讓2分贏" and win["c"] == "活塞贏5分" and win["d"] == SUCCESS

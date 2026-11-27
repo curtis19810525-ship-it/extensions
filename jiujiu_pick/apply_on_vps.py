@@ -12,11 +12,13 @@ from pathlib import Path
 MARKER = "nba_pick_installed"
 WRAPPER = '''
 # nba_pick_installed
+# pick_two_rows
 import nba_pick as _nba_pick
 
 _nba_pick_orig_write = write_game_notes
 _nba_pick_orig_merge = merged_game_notes
 _nba_pick_orig_archive = write_game_note_archive
+_NBA_PICK_KEYS = ("賽前預測", "AI推薦", "我的推薦")
 
 
 def _nba_pick_pop(game_notes):
@@ -24,8 +26,11 @@ def _nba_pick_pop(game_notes):
     if not isinstance(game_notes, dict):
         return saved
     for key, slot in list(game_notes.items()):
-        if isinstance(slot, dict) and "賽前預測" in slot:
-            saved[key] = slot.pop("賽前預測")
+        if not isinstance(slot, dict):
+            continue
+        kept = {name: slot.pop(name) for name in _NBA_PICK_KEYS if name in slot}
+        if kept:
+            saved[key] = kept
     return saved
 
 
@@ -37,7 +42,8 @@ def _nba_pick_put(game_notes, saved):
         if not isinstance(slot, dict):
             slot = {}
             game_notes[key] = slot
-        slot["賽前預測"] = value
+        if isinstance(value, dict):
+            slot.update(value)
 
 
 def write_game_notes(*args, **kwargs):
@@ -60,9 +66,9 @@ def write_game_notes(*args, **kwargs):
     call_kwargs = dict(kwargs)
     if isinstance(row, int):
         if row_index is not None and len(call_args) > row_index:
-            call_args[row_index] = row + 1
+            call_args[row_index] = row + 2
         elif "row" in call_kwargs:
-            call_kwargs["row"] = row + 1
+            call_kwargs["row"] = row + 2
     saved = _nba_pick_pop(game_notes)
     try:
         written = _nba_pick_orig_write(*call_args, **call_kwargs)
@@ -134,15 +140,16 @@ def install(root: Path, module_source: Path) -> str:
             text += "\n"
         notes.write_text(text + "\n" + WRAPPER.lstrip("\n"), encoding="utf-8")
         print(f"已掛上賽前預測，備份 {backup.name}")
-    elif "row_index" not in text:
+    elif "pick_two_rows" not in text:
         stamp = datetime.now().strftime("%Y%m%d%H%M%S")
         backup = notes.with_name(f"nba_game_notes.py.bak-pick-{stamp}")
         shutil.copy2(notes, backup)
         head = text.split("# " + MARKER, 1)[0].rstrip()
         notes.write_text(head + "\n\n" + WRAPPER.lstrip("\n"), encoding="utf-8")
-        print(f"已更新賽前預測參數順序，備份 {backup.name}")
+        print(f"已更新成 AI 與我的預測兩列，備份 {backup.name}")
     else:
         print("賽前預測已經掛過，只更新 nba_pick.py")
+    _widen_period_block(root)
     try:
         py = python_for(root)
         subprocess.check_call([py, "-m", "py_compile", str(dest), str(notes)])
@@ -158,6 +165,20 @@ def install(root: Path, module_source: Path) -> str:
     return py
 
 
+def _widen_period_block(root: Path):
+    path = root / "period_sheet.py"
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8")
+    if "MIN_BLOCK_ROWS) + 5" in text:
+        return
+    for old in ("MIN_BLOCK_ROWS) + 4", "MIN_BLOCK_ROWS) + 3"):
+        if text.count(old) == 1:
+            path.write_text(text.replace(old, "MIN_BLOCK_ROWS) + 5", 1), encoding="utf-8")
+            print("已加高每場列數，容納 AI 與我的預測")
+            return
+
+
 def restart_service():
     subprocess.check_call(["systemctl", "restart", "jiujiu-trigger"])
     state = subprocess.check_output(["systemctl", "is-active", "jiujiu-trigger"], text=True).strip()
@@ -171,7 +192,7 @@ def main():
     source = Path(__file__).resolve().parent / "nba_pick.py"
     install(root, source)
     restart_service()
-    print("賽前預測已裝上。下一輪寫入後，每一場的賽前想法上面會有選單。")
+    print("賽前預測已裝上。下一輪寫入後，每一場會有 AI推薦 與 我的推薦 兩組選單。")
 
 
 if __name__ == "__main__":
