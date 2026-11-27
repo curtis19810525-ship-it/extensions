@@ -56,6 +56,8 @@ PICK_RE = re.compile(
     r"(?P<tail>(?:[+-](?:25|50|75)|贏(?:25|50|75)|輸(?:25|50|75)))?"
     r"(?P<mark>贏|輸|走)?$"
 )
+SPREAD_HEADER_RE = re.compile(r"^(主|客)(?:讓分|受讓)([A-C])?$")
+MONEYLINE_HEADER_RE = re.compile(r"^(主|客).*獨贏")
 
 
 def format_points(value: float) -> str:
@@ -412,8 +414,47 @@ def _spread_cell(value) -> bool:
     return parse_spread_token(value) is not None and "(" in str(value or "")
 
 
+def _book_key(letter):
+    if not letter or letter == "A":
+        return ""
+    return letter
+
+
+def _latest_pair(ws, header, pick_row, home_col, away_col):
+    for row in range(pick_row - 1, header, -1):
+        marker = str(ws.cell(row, 1).value or "").strip()
+        second = str(ws.cell(row, 2).value or "").strip()
+        if marker in NOTE_LABELS or marker == PICK_LABEL or second == AI_KEY:
+            continue
+        left = ws.cell(row, home_col).value
+        right = ws.cell(row, away_col).value
+        if _spread_cell(left) or _spread_cell(right):
+            return left, right
+    return None
+
+
+def _label_spread_pair(ws, header, pick_row, home_col, away_col, home, away, suffix):
+    home_header = ws.cell(header, home_col).value
+    away_header = ws.cell(header, away_col).value
+    if not (_generic_spread_header(home_header) or _generic_spread_header(away_header)):
+        return
+    latest = _latest_pair(ws, header, pick_row, home_col, away_col)
+    if latest is None:
+        return
+    if _spread_cell(latest[0]) and not _spread_cell(latest[1]):
+        home_label, away_label = f"{home}讓分{suffix}", f"{away}受讓{suffix}"
+    elif _spread_cell(latest[1]) and not _spread_cell(latest[0]):
+        home_label, away_label = f"{home}受讓{suffix}", f"{away}讓分{suffix}"
+    else:
+        return
+    if _generic_spread_header(home_header):
+        ws.cell(header, home_col).value = home_label
+    if _generic_spread_header(away_header):
+        ws.cell(header, away_col).value = away_label
+
+
 def label_spread_headers(ws, pick_row: int):
-    """主隊讓分時，D/E 仍可能停在「主讓分／客讓分」。用最後一筆有球頭的列改成隊名。"""
+    """讓分 A/B/C 與獨贏的表頭改成隊名。A 盤不加字母，B、C 保留。"""
     header = find_header_row(ws, pick_row)
     if header is None:
         return
@@ -421,29 +462,23 @@ def label_spread_headers(ws, pick_row: int):
     away = strip_role(ws.cell(header, 3).value)
     if not home or not away:
         return
-    home_header = ws.cell(header, 4).value
-    away_header = ws.cell(header, 5).value
-    if not (_generic_spread_header(home_header) or _generic_spread_header(away_header)):
-        return
-    latest = None
-    for row in range(pick_row - 1, header, -1):
-        marker = str(ws.cell(row, 1).value or "").strip()
-        second = str(ws.cell(row, 2).value or "").strip()
-        if marker in NOTE_LABELS or marker == PICK_LABEL or second == AI_KEY:
+    spread_pairs = {}
+    for col in range(4, (ws.max_column or 4) + 1):
+        text = str(ws.cell(header, col).value or "").strip()
+        matched = SPREAD_HEADER_RE.match(text)
+        if matched:
+            spread_pairs.setdefault(_book_key(matched.group(2)), {})[matched.group(1)] = col
             continue
-        left = ws.cell(row, 4).value
-        right = ws.cell(row, 5).value
-        if _spread_cell(left) or _spread_cell(right):
-            latest = (left, right)
-            break
-    if latest is None:
-        return
-    if _spread_cell(latest[0]) and not _spread_cell(latest[1]):
-        ws.cell(header, 4).value = f"{home}讓分"
-        ws.cell(header, 5).value = f"{away}受讓"
-    elif _spread_cell(latest[1]) and not _spread_cell(latest[0]):
-        ws.cell(header, 4).value = f"{home}受讓"
-        ws.cell(header, 5).value = f"{away}讓分"
+        moneyline = MONEYLINE_HEADER_RE.match(text)
+        if moneyline:
+            name = home if moneyline.group(1) == "主" else away
+            ws.cell(header, col).value = f"{name}獨贏"
+    for key, sides in spread_pairs.items():
+        if "主" not in sides or "客" not in sides:
+            continue
+        _label_spread_pair(
+            ws, header, pick_row, sides["主"], sides["客"], home, away, key
+        )
 
 
 def render_pick(ws, title, row, game_notes, last_col=None):

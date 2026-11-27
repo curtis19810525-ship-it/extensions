@@ -234,6 +234,49 @@ class SheetTests(unittest.TestCase):
         self.assertEqual(ws["D2"].value, "拓荒者受讓")
         self.assertEqual(ws["E2"].value, "馬刺讓")
 
+    def test_books_b_c_and_moneyline_use_team_names(self):
+        wb = Workbook()
+        ws = wb.active
+        title = "11-28 08:00 邁阿密熱火 @ 紐約尼克(主)"
+        ws["A1"] = title
+        ws["A2"] = "時間"
+        ws["B2"] = "尼克 (主)"
+        ws["C2"] = "熱火"
+        ws["D2"] = "尼克讓分"
+        ws["E2"] = "熱火受讓"
+        ws["F2"] = "主讓分B"
+        ws["G2"] = "客讓分B"
+        ws["H2"] = "主讓分C"
+        ws["I2"] = "客讓分C"
+        ws["J2"] = "主獨贏"
+        ws["K2"] = "客獨贏"
+        ws["A3"] = "11-27 17:02"
+        ws["D3"] = "(4)0.95"
+        ws["E3"] = 0.95
+        ws["F3"] = "(4)0.967"
+        ws["G3"] = 0.88
+        ws["H3"] = "(4.5)1.045"
+        ws["I3"] = 0.90
+        ws["J3"] = 1.35
+        ws["K3"] = 3.10
+        pick.render_pick(ws, title, 4, {title: {}}, 12)
+        self.assertEqual(ws["D2"].value, "尼克讓分")
+        self.assertEqual(ws["E2"].value, "熱火受讓")
+        self.assertEqual(ws["F2"].value, "尼克讓分B")
+        self.assertEqual(ws["G2"].value, "熱火受讓B")
+        self.assertEqual(ws["H2"].value, "尼克讓分C")
+        self.assertEqual(ws["I2"].value, "熱火受讓C")
+        self.assertEqual(ws["J2"].value, "尼克獨贏")
+        self.assertEqual(ws["K2"].value, "熱火獨贏")
+
+        ws["F2"] = "主讓分B"
+        ws["G2"] = "客讓分B"
+        ws["F3"] = 0.88
+        ws["G3"] = "(4)0.967"
+        pick.render_pick(ws, title, 4, {title: {}}, 12)
+        self.assertEqual(ws["F2"].value, "尼克受讓B")
+        self.assertEqual(ws["G2"].value, "熱火讓分B")
+
     def test_archive_fits_note_text_and_draws_a_day_line(self):
         wb = Workbook()
         ws = wb.active
