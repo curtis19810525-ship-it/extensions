@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -35,6 +36,10 @@ FAIL_FONT = Font(bold=True, size=16, color="9C0006")
 PUSH_FILL = PatternFill(fill_type="solid", fgColor="D9D9D9")
 PUSH_FONT = Font(bold=True, size=16, color="595959")
 CENTER = Alignment(horizontal="center", vertical="center", wrap_text=True)
+NOTE_ALIGN = Alignment(horizontal="left", vertical="top", wrap_text=True)
+THICK_BOTTOM = Side(style="thick", color="000000")
+NOTE_HEADERS = ("賽前想法", "比賽結果")
+DATE_AT_START = re.compile(r"^\s*(\d{1,2})-(\d{1,2})")
 THIN = Border(
     left=Side(style="thin", color="B0B0B0"),
     right=Side(style="thin", color="B0B0B0"),
@@ -495,6 +500,109 @@ def _named_column(ws, header_row: int, name: str, create: bool):
     return col
 
 
+def _row_date(title):
+    match = DATE_AT_START.match(str(title or ""))
+    if not match:
+        return None
+    return (int(match.group(1)), int(match.group(2)))
+
+
+def _text_units(text) -> int:
+    units = 0
+    for char in str(text or ""):
+        units += 2 if ord(char) > 0x2E80 else 1
+    return units
+
+
+def _wrapped_lines(text, width: float) -> int:
+    usable = max(4.0, float(width) - 1.0)
+    raw = "" if text is None else str(text).replace("\r\n", "\n")
+    if raw.strip() == "":
+        return 1
+    lines = 0
+    for para in raw.split("\n"):
+        units = _text_units(para)
+        lines += 1 if units == 0 else max(1, math.ceil(units / usable))
+    return lines
+
+
+def _column_width(ws, col: int) -> float:
+    letter = ws.cell(1, col).column_letter
+    width = ws.column_dimensions[letter].width
+    if not isinstance(width, (int, float)) or width < 16:
+        width = 32
+        ws.column_dimensions[letter].width = width
+    return float(width)
+
+
+def _with_bottom(cell, side):
+    current = cell.border
+    cell.border = Border(
+        left=current.left,
+        right=current.right,
+        top=current.top,
+        bottom=side,
+    )
+
+
+def _needed_height(cell, width: float) -> float:
+    size = cell.font.size if isinstance(getattr(cell.font, "size", None), (int, float)) else 11
+    lines = _wrapped_lines(cell.value, width)
+    # 手機 Excel 會把最後一行裁掉，多留一行的高度。
+    if str(cell.value or "").strip() and lines >= 2:
+        lines += 1
+    return min(409, lines * (float(size) + 4) + 4)
+
+
+def fit_note_archive(ws):
+    """賽前想法、比賽結果依文字換行並調整列高，每天最後一列畫粗底線。"""
+    header_row, title_col = _archive_layout(ws)
+    if not header_row or not title_col:
+        return
+    note_cols = []
+    last_col = 1
+    for col in range(1, (ws.max_column or 1) + 1):
+        value = ws.cell(header_row, col).value
+        if value not in (None, ""):
+            last_col = col
+        if value in NOTE_HEADERS:
+            note_cols.append(col)
+    if not note_cols:
+        note_cols = [2, 3]
+        last_col = max(last_col, 3)
+    widths = {col: _column_width(ws, col) for col in note_cols}
+    dated = []
+    for row in range(header_row + 1, (ws.max_row or header_row) + 1):
+        title = str(ws.cell(row, title_col).value or "").strip()
+        if not title:
+            continue
+        day = _row_date(title)
+        if day is not None:
+            dated.append((row, day))
+        height = 18.0
+        for col in note_cols:
+            cell = ws.cell(row, col)
+            cell.alignment = NOTE_ALIGN
+            height = max(height, _needed_height(cell, widths[col]))
+        ws.row_dimensions[row].height = height
+    boundaries = set()
+    for index, (row, day) in enumerate(dated):
+        nxt = dated[index + 1][1] if index + 1 < len(dated) else None
+        if day != nxt:
+            boundaries.add(row)
+    for row in range(header_row + 1, (ws.max_row or header_row) + 1):
+        title = str(ws.cell(row, title_col).value or "").strip()
+        if not title:
+            continue
+        side = THICK_BOTTOM if row in boundaries else None
+        for col in range(1, last_col + 1):
+            cell = ws.cell(row, col)
+            current = cell.border.bottom.style if cell.border.bottom is not None else None
+            if side is None and current != "thick":
+                continue
+            _with_bottom(cell, side if side is not None else Side())
+
+
 def archive_into(notes, wb, seen):
     if not isinstance(notes, dict) or "賽事筆記" not in wb.sheetnames:
         return
@@ -564,6 +672,7 @@ def archive_picks(wb, game_notes):
             rows[title_text] = target
         for key, col in columns.items():
             ws.cell(target, col, stored[key] or None)
+    fit_note_archive(ws)
 
 
 def selftest():

@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.styles import Border, Side
 
 ROOT = Path(__file__).resolve().parents[1]
 PICK = ROOT / "jiujiu_pick" / "nba_pick.py"
@@ -186,6 +187,45 @@ class SheetTests(unittest.TestCase):
         restored = {}
         pick.merge_picks(book, restored)
         self.assertEqual(restored[title]["賽前預測"], "活塞讓2分")
+
+    def test_archive_fits_note_text_and_draws_a_day_line(self):
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "賽事筆記"
+        ws["A1"] = "場次"
+        ws["B1"] = "賽前想法"
+        ws["C1"] = "比賽結果"
+        ws.column_dimensions["B"].width = 20
+        ws.column_dimensions["C"].width = 20
+        long_note = "老鷹主場讓分從6.5到8.75，覺得是順向盤，看好老鷹贏9分以上。"
+        rows = [
+            (2, "11-20 09:00 勇士 @ 灰熊(主)", "短", "灰熊贏"),
+            (3, "11-21 08:00 黃蜂 @ 老鷹(主)", long_note * 3, "黃蜂97-老鷹111，老鷹贏14分"),
+            (4, "11-21 08:30 溜馬 @ 騎士(主)", "短", "騎士贏"),
+        ]
+        for row, title, pregame, result in rows:
+            ws.cell(row, 1, title)
+            ws.cell(row, 2, pregame)
+            ws.cell(row, 3, result)
+        ws.row_dimensions[3].height = 15
+        for col in range(1, 4):
+            ws.cell(3, col).border = Border(bottom=Side(style="thick", color="000000"))
+
+        pick.archive_picks(wb, {})
+
+        self.assertTrue(ws["B3"].alignment.wrap_text)
+        self.assertEqual(ws["B3"].alignment.vertical, "top")
+        self.assertTrue(ws["C4"].alignment.wrap_text)
+        self.assertGreater(ws.row_dimensions[3].height, ws.row_dimensions[2].height)
+        self.assertGreater(ws.row_dimensions[3].height, 15)
+        self.assertEqual(ws["A2"].border.bottom.style, "thick")
+        self.assertEqual(ws["B2"].border.bottom.style, "thick")
+        self.assertEqual(ws["C2"].border.bottom.style, "thick")
+        self.assertNotEqual(ws["A3"].border.bottom.style, "thick")
+        self.assertNotEqual(ws["C3"].border.bottom.style, "thick")
+        self.assertEqual(ws["A4"].border.bottom.style, "thick")
+        self.assertEqual(ws["C4"].border.bottom.style, "thick")
+        self.assertEqual(ws.column_dimensions["B"].width, 20)
 
 
 FAKE_NOTES = '''# -*- coding: utf-8 -*-
